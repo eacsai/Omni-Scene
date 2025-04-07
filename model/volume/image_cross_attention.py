@@ -262,7 +262,7 @@ class TPVMSDeformableAttention3D(BaseModule):
         self.num_points = num_points
         self.num_z_anchors = num_z_anchors
         self.base_num_points = num_points[0]
-        self.base_z_anchors = num_z_anchors[0]
+        self.base_z_anchors = min(num_z_anchors)
         self.points_multiplier = [
             points // self.base_z_anchors for points in num_z_anchors
         ]

@@ -354,7 +354,7 @@ def get_fov_gaussian(P):
 
 
 def get_cam_info_gaussian(c2w, fovx, fovy, znear, zfar):
-    c2w = convert_pose(c2w)
+    # c2w = convert_pose(c2w)
     world_view_transform = torch.inverse(c2w.float())
 
     world_view_transform = world_view_transform.transpose(0, 1).cuda().float()
@@ -418,3 +418,24 @@ def validate_empty_rays(ray_indices, t_start, t_end):
         t_start = torch.Tensor([0]).to(ray_indices)
         t_end = torch.Tensor([0]).to(ray_indices)
     return ray_indices, t_start, t_end
+
+def get_panorama_ray_directions(
+    H: int,
+    W: int,
+):  
+    # 创建 theta 和 phi 为 1D 张量
+    theta = torch.linspace(0, 2 * torch.pi, W)  # 方位角 [0, 2π]
+    phi = torch.linspace(0, torch.pi, H)       # 仰角 [0, π]
+    
+    # 生成网格，调整 indexing='ij' 确保符合 PyTorch 约定
+    phi, theta = torch.meshgrid(phi, theta, indexing='ij')
+
+    # 计算 OpenCV 形式的 X, Y, Z 坐标
+    x = -torch.sin(phi) * torch.sin(theta)   # OpenCV X: 右
+    y = -torch.cos(phi)                     # OpenCV Y: 下
+    z = -torch.sin(phi) * torch.cos(theta)  # OpenCV Z: 前
+
+    # 将 x, y, z 堆叠在一起，并调整维度 (height, width, 3)
+    directions = torch.stack((x, y, z), dim=-1)  # (B, H, W, 3)
+    
+    return directions

@@ -27,9 +27,9 @@ class VolumeGaussian(BaseModule):
         if gs_decoder:
             self.gs_decoder = MODELS.build(gs_decoder)
 
-        self.tpv_h = self.encoder.tpv_h
-        self.tpv_w = self.encoder.tpv_w
-        self.tpv_z = self.encoder.tpv_z
+        self.tpv_h = self.encoder.tpv_h  #y
+        self.tpv_w = self.encoder.tpv_w  #x
+        self.tpv_z = self.encoder.tpv_z  #z
         self.pc_range = self.encoder.pc_range
         self.pc_xrange = self.pc_range[3] - self.pc_range[0]
         self.pc_yrange = self.pc_range[4] - self.pc_range[1]

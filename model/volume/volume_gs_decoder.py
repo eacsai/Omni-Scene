@@ -37,17 +37,19 @@ class VolumeGaussianDecoder(BaseModule):
         self.use_checkpoint = use_checkpoint
 
         # set activations
-        # TODO: check if optimal
+        # TODO check if optimal
         self.pos_act = lambda x: torch.tanh(x)
         if offset_max is None:
             self.offset_max = [1.0] * 3 # meters
         else:
             self.offset_max = offset_max
+        self.offset_max = [1.0] * 3
         #self.scale_act = lambda x: sigmoid_scaling(x, lower_bound=0.005, upper_bound=0.02)
         if scale_max is None:
             self.scale_max = [1.0] * 3 # meters
         else:
             self.scale_max = scale_max
+        self.scale_max = [1.0] * 3 
         self.scale_act = lambda x: torch.sigmoid(x)
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)

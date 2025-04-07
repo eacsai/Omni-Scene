@@ -17,9 +17,12 @@ from .gaussian import GaussianRenderer
 from .losses import LPIPS, LossDepthTV
 from .utils.image import maybe_resize
 from .utils.benchmarker import Benchmarker
-from torchmetrics import PearsonCorrCoef
 from .utils.interpolation import interpolate_extrinsics
 
+from pano2cube import Equirec2Cube, Cube2Equirec
+from vis_feat import single_features_to_RGB
+import torchvision.transforms as transforms
+to_pil_image = transforms.ToPILImage()
 
 @MODELS.register_module()
 class OmniGaussian(BaseModule):
@@ -63,6 +66,9 @@ class OmniGaussian(BaseModule):
         # record runtime
         self.benchmarker = Benchmarker()
 
+        self.E2C = Equirec2Cube(equ_h=320, equ_w=640, cube_length=160)
+        self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
+
     def extract_img_feat(self, img, status="train"):
         """Extract features of images."""
         B, N, C, H, W = img.size()
@@ -77,7 +83,30 @@ class OmniGaussian(BaseModule):
         img_feats_reshaped = []
         for img_feat in img_feats:
             _, C, H, W = img_feat.size()
+            # single_features_to_RGB(img_feat)
             img_feats_reshaped.append(img_feat.view(B, N, C, H, W))
+        return img_feats_reshaped
+
+    def cube_extract_img_feat(self, img, status="train"):
+        # TODO: transform panorama to cubemap
+        cube_rgb = self.E2C(img.squeeze(1))
+        """Extract features of images."""
+        B, N, C, H, W = cube_rgb.size()
+        cube_rgb = cube_rgb.view(B * N, C, H, W)
+
+        if self.use_checkpoint and status != "test":
+            img_feats = torch.utils.checkpoint.checkpoint(
+                            self.backbone, cube_rgb, use_reentrant=False)
+        else:
+            img_feats = self.backbone(cube_rgb)
+        img_feats = self.neck(img_feats) # BV, C, H, W
+        img_feats_reshaped = []
+        for img_feat in img_feats:
+            _, C, H, W = img_feat.size()
+            # TODO: transform cubemap to panorama
+            panorama_feat = self.C2E(img_feat)
+            single_features_to_RGB(panorama_feat)
+            img_feats_reshaped.append(panorama_feat.unsqueeze(1))
         return img_feats_reshaped
 
     @property
@@ -110,6 +139,7 @@ class OmniGaussian(BaseModule):
         rays_d = batch["inputs_pix"]["rays_d"].to(device_id, dtype=self.dtype)
         data_dict["rays_o"] = rays_o
         data_dict["rays_d"] = rays_d
+        # TODO Panorama direction
         data_dict["pluckers"] = self.plucker_embedder(rays_o, rays_d)
         data_dict["fxs"] = batch["inputs_pix"]["fx"].to(device_id, dtype=self.dtype)
         data_dict["fys"] = batch["inputs_pix"]["fy"].to(device_id, dtype=self.dtype)
@@ -138,7 +168,7 @@ class OmniGaussian(BaseModule):
         data_dict["output_fovxs"] = batch["outputs"]["fovx"].to(device_id, dtype=self.dtype)
         data_dict["output_fovys"] = batch["outputs"]["fovy"].to(device_id, dtype=self.dtype)
 
-        data_dict["bin_token"] = batch["bin_token"]
+        data_dict["bin_token"] = 'test'
 
         return data_dict
     
@@ -199,6 +229,17 @@ class OmniGaussian(BaseModule):
             rays_o=None,
             rays_d=None
         )
+        # render_pkg_pixel = self.renderer.render(
+        #     gaussians=gaussians_pixel,
+        #     c2w=render_c2w,
+        #     fovx=render_fovxs,
+        #     fovy=render_fovys,
+        #     rays_o=None,
+        #     rays_d=None
+        # )
+        render_pkg_pixel_bev = self.renderer.render_orthographic(
+            gaussians=gaussians_all,
+        )
         if split == "train" or split == "val":
             render_pkg_pixel = self.renderer.render(
                 gaussians=gaussians_pixel,
@@ -228,6 +269,7 @@ class OmniGaussian(BaseModule):
 
         # =================== Data preparation =================== #        
         rgb_gt = data_dict["output_imgs"]
+        rgb_gt = self.E2C(rgb_gt)
         data_dict["rgb_gt"] = rgb_gt
         depth_m_gt = data_dict["output_depths_m"]
         conf_m_gt = data_dict["output_confs_m"]
@@ -249,8 +291,19 @@ class OmniGaussian(BaseModule):
                         (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
                         (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
             mask_dptm = mask_dptm.float()
+        mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm
-            
+
+        test_img = to_pil_image(render_pkg_pixel["image"][0,0])    
+        test_img.save('render_cube1_pixel.png')
+        test_img = to_pil_image(render_pkg_fuse["image"][0,0])    
+        test_img.save('render_cube1_fuse.png')
+        test_img = to_pil_image(render_pkg_volume["image"][0,0])    
+        test_img.save('render_cube1_volume.png')
+        test_img = to_pil_image(rgb_gt[0,0])    
+        test_img.save('render_cube1_gt.png')
+        test_img = to_pil_image(render_pkg_pixel_bev["image"][0])
+        test_img.save('render_bev.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
             # RGB loss for omni-gs
@@ -306,6 +359,8 @@ class OmniGaussian(BaseModule):
 
         # ==================== Depth loss ===================== #
         ### Depth loss for omni-gs. For regularization use.
+        depth_m_gt = self.E2C(depth_m_gt).squeeze(2)
+        conf_m_gt = self.E2C(conf_m_gt).squeeze(2)
         if self.loss_args.weight_depth_abs > 0:
             depth_abs_loss = torch.abs(render_pkg_fuse["depth"].squeeze(2) - depth_m_gt)
             depth_abs_loss = depth_abs_loss * conf_m_gt
@@ -441,7 +496,6 @@ class OmniGaussian(BaseModule):
         c2w_cbl = data_dict["output_c2ws"][:, -2]
         c2w_cbr = data_dict["output_c2ws"][:, -1]
         # cf -> cfr -> cbr -> cb -> cbl -> cfl -> cf
-        # TODO: set as parameters
         num_frames_short = 60
         num_frames_long = 120
         num_frames_all = 60 * 4 + 120 * 6

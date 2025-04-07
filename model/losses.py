@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torchvision import models
 from collections import namedtuple
-from torchmetrics import PearsonCorrCoef
+# from torchmetrics import PearsonCorrCoef
 
 from taming.util import get_ckpt_path
 import math

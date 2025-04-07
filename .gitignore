@@ -3,3 +3,7 @@
 **/.DS_Store
 *workdirs*
 **/.cache
+checkpoint-100000
+launch.json
+*.png
+*.jpg

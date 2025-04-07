@@ -1,5 +1,6 @@
-
 import os, time, argparse, os.path as osp, numpy as np
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -17,6 +18,8 @@ import logging
 from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
+
+from data.vigor_dataloader import load_vigor_data
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -117,23 +120,25 @@ def main(args):
     scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warm_up, scheduler], milestones=[cfg.warmup_steps*accelerator.num_processes])
 
     # generate datasets
-    dataset = getattr(datasets, dataset_config.dataset_name)
-    train_dataset = dataset(dataset_config.resolution, split="train",
-                            use_center=dataset_config.use_center,
-                            use_first=dataset_config.use_first,
-                            use_last=dataset_config.use_last)
-    val_dataset = dataset(dataset_config.resolution, split="val",
-                          use_center=dataset_config.use_center,
-                          use_first=dataset_config.use_first,
-                          use_last=dataset_config.use_last)
-    train_dataloader = DataLoader(
-        train_dataset, dataset_config.batch_size_train, shuffle=True,
-        num_workers=dataset_config.num_workers
-    )
-    val_dataloader = DataLoader(
-        val_dataset, dataset_config.batch_size_val, shuffle=False,
-        num_workers=dataset_config.num_workers_val
-    )
+    # dataset = getattr(datasets, dataset_config.dataset_name)
+    # train_dataset = dataset(dataset_config.resolution, split="train",
+    #                         use_center=dataset_config.use_center,
+    #                         use_first=dataset_config.use_first,
+    #                         use_last=dataset_config.use_last)
+    # val_dataset = dataset(dataset_config.resolution, split="val",
+    #                       use_center=dataset_config.use_center,
+    #                       use_first=dataset_config.use_first,
+    #                       use_last=dataset_config.use_last)
+    # train_dataloader = DataLoader(
+    #     train_dataset, dataset_config.batch_size_train, shuffle=True,
+    #     num_workers=dataset_config.num_workers
+    # )
+    # val_dataloader = DataLoader(
+    #     val_dataset, dataset_config.batch_size_val, shuffle=False,
+    #     num_workers=dataset_config.num_workers_val
+    # )
+
+    train_dataloader, val_dataloader = load_vigor_data(dataset_config.batch_size_test)
 
     my_model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
         my_model, optimizer, train_dataloader, val_dataloader, scheduler
@@ -163,15 +168,15 @@ def main(args):
             else:
                 path = None
 
-    if path:
-        accelerator.print(f"Resuming from checkpoint {path}")
-        accelerator.load_state(osp.join(cfg.work_dir, path), map_location='cpu', strict=False)
-        global_iter = int(path.split("-")[1])
-        first_epoch = global_iter // num_update_steps_per_epoch
-        resume_step = global_iter % num_update_steps_per_epoch
-        print(f'successfully resumed from epoch{first_epoch}-iter{global_iter}')
-    else:
-        resume_step = -1
+    # if path:
+    #     accelerator.print(f"Resuming from checkpoint {path}")
+    #     accelerator.load_state(osp.join(cfg.work_dir, path), map_location='cpu', strict=False)
+    #     global_iter = int(path.split("-")[1])
+    #     first_epoch = global_iter // num_update_steps_per_epoch
+    #     resume_step = global_iter % num_update_steps_per_epoch
+    #     print(f'successfully resumed from epoch{first_epoch}-iter{global_iter}')
+    # else:
+    #     resume_step = -1
     
     print('work dir: ', args.work_dir)
     
@@ -199,7 +204,7 @@ def main(args):
             # Checks if the accelerator has performed an optimization step behind the scenes
             accelerator.wait_for_everyone()
             if accelerator.sync_gradients and accelerator.is_main_process:
-                if global_iter % cfg.save_freq == 0:
+                if global_iter > 0 and global_iter % cfg.save_freq == 0:
                     if accelerator.is_main_process:
                         save_file_name = os.path.join(os.path.abspath(args.work_dir), f'checkpoint-{global_iter}')
                         accelerator.save_state(save_file_name)
@@ -208,13 +213,13 @@ def main(args):
                         if logger is not None:
                             logger.info('[TRAIN] Save latest state dict to {}.'.format(save_file_name))
                 
-                if global_iter % cfg.val_freq == 0:
+                if global_iter > 0 and global_iter % cfg.val_freq == 0:
                     my_model.eval()
                     if accelerator.is_main_process:
                         for i_iter_val, batch_val in enumerate(val_dataloader):
                             val_batch_save_dir = osp.join(cfg.output_dir, cfg.exp_name, "validation",
                                                 "step-{}/batch-{}".format(global_iter, i_iter_val))
-                            log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
+                            log_val = my_model.validation_step(batch_val, val_batch_save_dir)
                             log.update(log_val)
                     my_model.train()
             

@@ -1,7 +1,7 @@
 
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -23,6 +23,7 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration
 from tools.visualization import depths_to_colors
 
+from data.vigor_dataloader import load_vigor_data
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -99,25 +100,27 @@ def main(args):
         logger.info(f'Number of params: {n_parameters}')
 
     # generate datasets
-    dataset = getattr(datasets, dataset_config.dataset_name)
-    demo_dataset = dataset(dataset_config.resolution, split="demo",
-                          use_center=dataset_config.use_center,
-                          use_first=dataset_config.use_first,
-                          use_last=dataset_config.use_last)
-    demo_dataloader = DataLoader(
-        demo_dataset, dataset_config.batch_size_test, shuffle=False,
-        num_workers=dataset_config.num_workers_test
-    )
+    # dataset = getattr(datasets, dataset_config.dataset_name)
+    # demo_dataset = dataset(dataset_config.resolution, split="demo",
+    #                       use_center=dataset_config.use_center,
+    #                       use_first=dataset_config.use_first,
+    #                       use_last=dataset_config.use_last)
+    # demo_dataloader = DataLoader(
+    #     demo_dataset, dataset_config.batch_size_test, shuffle=False,
+    #     num_workers=dataset_config.num_workers_test
+    # )
+
+    train_dataloader, val_dataloader = load_vigor_data(dataset_config.batch_size_test)
 
     my_model, demo_dataloader = accelerator.prepare(
-        my_model, demo_dataloader
+        my_model, train_dataloader
     )
 
     # Potentially load in the weights and states from a previous save
     if args.load_from:
         cfg.load_from = args.load_from
-    if cfg.load_from:
-        path = cfg.load_from
+    # if cfg.load_from:
+    #     path = cfg.load_from
     else:
         path = None
 
