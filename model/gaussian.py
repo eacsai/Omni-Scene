@@ -5,16 +5,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from einops import rearrange
+from pano2cube import Equirec2Cube, Cube2Equirec
 
-from diff_gaussian_rasterization import (
-    GaussianRasterizationSettings, 
-    GaussianRasterizer
-)
+renderer_type = 'panorama' # "vanilla" or "panorama"
 
-# from pano_gaussian import (
-#     GaussianRasterizationSettings, 
-#     GaussianRasterizer
-# )
+if renderer_type == 'panorama':
+    from pano_gaussian import (
+        GaussianRasterizationSettings, 
+        GaussianRasterizer
+    )
+else:
+    from diff_gaussian_rasterization import (
+        GaussianRasterizationSettings, 
+        GaussianRasterizer
+    )
 
 from .utils.ops import get_cam_info_gaussian
 from .utils.typing import *
@@ -141,7 +145,6 @@ class GaussianRenderer:
         resolution: list = [512, 512],
         znear: float = 0.1,
         zfar: float = 100.0, 
-        renderer_type: str = "vanilla", # only support "vanilla"
         **kwargs,
     ):  
         self.renderer_type = renderer_type
@@ -154,7 +157,7 @@ class GaussianRenderer:
         self.normal_module = Depth2Normal().to(device)
 
         self.setup_functions()
-
+        self.C2E = Cube2Equirec(cube_length=80, equ_h=160)
 
     def setup_functions(self):
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
@@ -288,11 +291,14 @@ class GaussianRenderer:
                 images.append(rendered_image)
                 alphas.append(rendered_depth)
                 depths.append(rendered_depth)
-
-        images = torch.stack(images, dim=0).view(B, V, 3, self.resolution[0], self.resolution[1])
-        alphas = torch.stack(alphas, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
-        depths = torch.stack(depths, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
-
+        if self.renderer_type == "panorama":
+            images = torch.stack(images, dim=0).view(B, V, 3, self.resolution[0], self.resolution[1])
+            alphas = torch.stack(alphas, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
+            depths = torch.stack(depths, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
+        else:
+            images = self.C2E(torch.stack(images, dim=0)).unsqueeze(1)
+            alphas = self.C2E(torch.stack(alphas, dim=0)).unsqueeze(1)
+            depths = self.C2E(torch.stack(depths, dim=0)).unsqueeze(1)
         return {
             "image": images, # [B, V, 3, H, W]
             "alpha": alphas, # [B, V, 1, H, W]

@@ -267,13 +267,7 @@ class TPVFormerEncoder(TransformerLayerSequence):
     def pano_point_sampling(self, reference_points, pc_range, img_metas):
         # TODO change to panorama
         h, w = list(img_metas[0]["img_shape"])[0]
-        lidar2img = []
-        for img_meta in img_metas:
-            lidar2img.append(img_meta["lidar2img"].cpu())
-        lidar2img = np.asarray(lidar2img)
-        lidar2img = reference_points.new_tensor(lidar2img)  # (B, N, 4, 4)
         reference_points = reference_points.clone()
-
         reference_points[..., 0:1] = reference_points[..., 0:1] * \
             (pc_range[3] - pc_range[0]) + pc_range[0]
         reference_points[..., 1:2] = reference_points[..., 1:2] * \

@@ -3,15 +3,15 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_nusc_novelview_r50_224x400"
+exp_name = "omni_gs_160x320_mp3d"
 output_dir = "workdirs"
 
 lr = 1e-4
 grad_max_norm = 1.0
 print_freq = 100
-save_freq = 5000
-val_freq = 5000
-max_epochs = 30
+save_freq = 3000
+val_freq = 3000
+max_epochs = 10
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
@@ -26,10 +26,10 @@ volume_only = False
 use_checkpoint = True
 seed = 0
 use_center, use_first, use_last = True, False, False
-# resolution = [160, 320]
-resolution = [80, 80]
+resolution = [160, 320]
+# resolution = [80, 80]
 # point_cloud_range = [-50.0, -50.0, -3.0, 50.0, 50.0, 12.0]
-point_cloud_range = [-30.0, -20.0, -30.0, 30.0, 3.0, 30.0]
+point_cloud_range = [-20.0, -2.5, -20.0, 20.0, 2.5, 20.0]
 dataset_params = dict(
     dataset_name="nuScenesDataset",
     seed=seed,
@@ -38,9 +38,9 @@ dataset_params = dict(
     use_center=use_center,
     use_first=use_first,
     use_last=use_last,
-    batch_size_train=8,
-    batch_size_val=8,
-    batch_size_test=8,
+    batch_size_train=6,
+    batch_size_val=6,
+    batch_size_test=6,
     num_workers=32,
     num_workers_val=32,
     num_workers_test=32
@@ -48,7 +48,7 @@ dataset_params = dict(
 
 num_cams = 1
 near = 0.1
-far = 1000.0
+far = 15.0
 camera_args = dict(
     resolution=resolution,
     znear=near,
@@ -64,7 +64,7 @@ loss_args = dict(
     recon_loss_type="l2",
     recon_loss_vol_type="l2_mask",
     perceptual_loss_vol_type="mask",
-    depth_abs_loss_vol_type="mask_self",
+    depth_abs_loss_vol_type="mask",
     mask_dptm=True,
     perceptual_resolution=[resolution[0], resolution[1]],
     weight_recon=1.0,

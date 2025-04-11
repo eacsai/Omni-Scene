@@ -3,7 +3,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_nusc_novelview_r50_224x400"
+exp_name = "omni_gs_160x320"
 output_dir = "workdirs"
 
 lr = 1e-4
@@ -26,8 +26,8 @@ volume_only = False
 use_checkpoint = True
 seed = 0
 use_center, use_first, use_last = True, False, False
-# resolution = [160, 320]
-resolution = [80, 80]
+resolution = [160, 320]
+# resolution = [80, 80]
 # point_cloud_range = [-50.0, -50.0, -3.0, 50.0, 50.0, 12.0]
 point_cloud_range = [-30.0, -20.0, -30.0, 30.0, 3.0, 30.0]
 dataset_params = dict(
@@ -38,9 +38,9 @@ dataset_params = dict(
     use_center=use_center,
     use_first=use_first,
     use_last=use_last,
-    batch_size_train=8,
-    batch_size_val=8,
-    batch_size_test=8,
+    batch_size_train=2,
+    batch_size_val=2,
+    batch_size_test=2,
     num_workers=32,
     num_workers_val=32,
     num_workers_test=32

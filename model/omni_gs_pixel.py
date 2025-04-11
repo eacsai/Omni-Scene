@@ -198,70 +198,70 @@ class OmniGaussian(BaseModule):
                 data_dict["rays_o"], data_dict["rays_d"])
 
         # volume-gs prediction
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        gaussians_pixel_mask, gaussians_feat_mask = [], []
-        for b in range(bs):
-            mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
-                        (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
-                        (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
-            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-            gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            gaussians_feat_mask.append(gaussians_feat_mask_i)
-        gaussians_volume = self.volume_gs(
-                [img_feats[0]],
-                gaussians_pixel_mask,
-                gaussians_feat_mask,
-                data_dict["img_metas"])
+        # pc_range = self.dataset_params.pc_range
+        # x_start, y_start, z_start, x_end, y_end, z_end = pc_range
+        # gaussians_pixel_mask, gaussians_feat_mask = [], []
+        # for b in range(bs):
+        #     mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
+        #                 (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
+        #                 (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
+        #     gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
+        #     gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
+        #     gaussians_pixel_mask.append(gaussians_pixel_mask_i)
+        #     gaussians_feat_mask.append(gaussians_feat_mask_i)
+        # gaussians_volume = self.volume_gs(
+        #         [img_feats[0]],
+        #         gaussians_pixel_mask,
+        #         gaussians_feat_mask,
+        #         data_dict["img_metas"])
         
-        gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
+        # gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
 
         bs = gaussians_pixel.shape[0]
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]
         render_fovys = data_dict["output_fovys"]
         
-        render_pkg_fuse = self.renderer.render(
-            gaussians=gaussians_all,
-            c2w=render_c2w,
-            fovx=render_fovxs,
-            fovy=render_fovys,
-            rays_o=None,
-            rays_d=None
-        )
-        # render_pkg_pixel = self.renderer.render(
-        #     gaussians=gaussians_pixel,
+        # render_pkg_fuse = self.renderer.render(
+        #     gaussians=gaussians_all,
         #     c2w=render_c2w,
         #     fovx=render_fovxs,
         #     fovy=render_fovys,
         #     rays_o=None,
         #     rays_d=None
         # )
+        render_pkg_pixel = self.renderer.render(
+            gaussians=gaussians_pixel,
+            c2w=render_c2w,
+            fovx=render_fovxs,
+            fovy=render_fovys,
+            rays_o=None,
+            rays_d=None
+        )
         render_pkg_pixel_bev = self.renderer.render_orthographic(
-            gaussians=gaussians_all,
+            gaussians=gaussians_pixel,
             width=15,
             height=15, #mp3d 15 vigor 35
         )
-        if split == "train" or split == "val":
-            render_pkg_pixel = self.renderer.render(
-                gaussians=gaussians_pixel,
-                c2w=render_c2w,
-                fovx=render_fovxs,
-                fovy=render_fovys,
-                rays_o=None,
-                rays_d=None
-            )
-            render_pkg_volume = self.renderer.render(
-                gaussians=gaussians_volume,
-                c2w=render_c2w,
-                fovx=render_fovxs,
-                fovy=render_fovys,
-                rays_o=None,
-                rays_d=None
-            )
-        else:
-            render_pkg_pixel, render_pkg_volume = None, None
+        # if split == "train" or split == "val":
+        #     render_pkg_pixel = self.renderer.render(
+        #         gaussians=gaussians_pixel,
+        #         c2w=render_c2w,
+        #         fovx=render_fovxs,
+        #         fovy=render_fovys,
+        #         rays_o=None,
+        #         rays_d=None
+        #     )
+        #     render_pkg_volume = self.renderer.render(
+        #         gaussians=gaussians_volume,
+        #         c2w=render_c2w,
+        #         fovx=render_fovxs,
+        #         fovy=render_fovys,
+        #         rays_o=None,
+        #         rays_d=None
+        #     )
+        # else:
+        #     render_pkg_pixel, render_pkg_volume = None, None
         
         # ======================== losses ======================== #
         loss = 0.0
@@ -298,41 +298,41 @@ class OmniGaussian(BaseModule):
         data_dict["mask_dptm"] = mask_dptm
 
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d.png')
-        test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_fuse_mp3d.png')
-        test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d.png')
+        test_img.save('render_pixel_mp3d_pixel.png')
+        # test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_fuse_mp3d.png')
+        # test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_volume_mp3d.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d.png')
+        test_img.save('render_gt_mp3d_pixel.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d.png')
+        test_img.save('render_bev_mp3d_pixel.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
             # RGB loss for omni-gs
             if self.loss_args.recon_loss_type == "l1":
-                rec_loss = torch.abs(rgb_gt - render_pkg_fuse["image"])
+                rec_loss = torch.abs(rgb_gt - render_pkg_pixel["image"])
             elif self.loss_args.recon_loss_type == "l2":
-                rec_loss = (rgb_gt - render_pkg_fuse["image"]) ** 2
+                rec_loss = (rgb_gt - render_pkg_pixel["image"]) ** 2
             loss = loss + (rec_loss.mean() * self.loss_args.weight_recon)
             set_loss("recon", split, rec_loss.mean(), self.loss_args.weight_recon)
-        if self.loss_args.weight_recon_vol > 0 and iter < iter_end - 1000:
-            # RGB loss for volume-gs
-            if self.loss_args.recon_loss_vol_type == "l1":
-                rec_loss_vol = torch.abs(rgb_gt - render_pkg_volume["image"])
-            elif self.loss_args.recon_loss_vol_type == "l2":
-                rec_loss_vol = (rgb_gt - render_pkg_volume["image"]) ** 2
-            elif self.loss_args.recon_loss_vol_type == "l2_mask" or self.loss_args.recon_loss_vol_type == "l2_mask_self":
-                rec_loss_vol = (rgb_gt * mask_dptm.unsqueeze(2) - render_pkg_volume["image"] * mask_dptm.unsqueeze(2)) ** 2
-            loss = loss + (rec_loss_vol.mean() * self.loss_args.weight_recon_vol)
-            set_loss("recon_vol", split, rec_loss_vol.mean(), self.loss_args.weight_recon_vol)
+        # if self.loss_args.weight_recon_vol > 0 and iter < iter_end - 1000:
+        #     # RGB loss for volume-gs
+        #     if self.loss_args.recon_loss_vol_type == "l1":
+        #         rec_loss_vol = torch.abs(rgb_gt - render_pkg_volume["image"])
+        #     elif self.loss_args.recon_loss_vol_type == "l2":
+        #         rec_loss_vol = (rgb_gt - render_pkg_volume["image"]) ** 2
+        #     elif self.loss_args.recon_loss_vol_type == "l2_mask" or self.loss_args.recon_loss_vol_type == "l2_mask_self":
+        #         rec_loss_vol = (rgb_gt * mask_dptm.unsqueeze(2) - render_pkg_volume["image"] * mask_dptm.unsqueeze(2)) ** 2
+        #     loss = loss + (rec_loss_vol.mean() * self.loss_args.weight_recon_vol)
+        #     set_loss("recon_vol", split, rec_loss_vol.mean(), self.loss_args.weight_recon_vol)
 
         # ==================== Perceptual loss ===================== #
         if self.loss_args.weight_perceptual > 0:
             # Perceptual loss for omni-gs
             ## resize images to smaller size to save memory
             p_inp_pred = maybe_resize(
-                render_pkg_fuse["image"].reshape(-1, 3, self.camera_args.resolution[0], self.camera_args.resolution[1]),
+                render_pkg_pixel["image"].reshape(-1, 3, self.camera_args.resolution[0], self.camera_args.resolution[1]),
                 tgt_reso=self.loss_args.perceptual_resolution
             )
             p_inp_gt = maybe_resize(
@@ -344,46 +344,47 @@ class OmniGaussian(BaseModule):
             p_loss = p_loss.mean()
             loss = loss + (p_loss * self.loss_args.weight_perceptual)
             set_loss("perceptual", split, p_loss, self.loss_args.weight_perceptual)
-        if self.loss_args.weight_perceptual_vol > 0 and iter < iter_end - 1000:
-            # Perceptual loss for volume-gs
-            p_inp_pred_vol = maybe_resize(
-                render_pkg_volume["image"].reshape(-1, 3, self.camera_args.resolution[0], self.camera_args.resolution[1]),
-                tgt_reso=self.loss_args.perceptual_resolution
-            )
-            p_inp_mask_vol = maybe_resize(
-                mask_dptm.reshape(-1, 1, self.camera_args.resolution[0], self.camera_args.resolution[1]), 
-                tgt_reso=self.loss_args.perceptual_resolution
-            )
-            p_loss_vol = self.perceptual_loss(p_inp_pred_vol * p_inp_mask_vol, p_inp_gt * p_inp_mask_vol)
-            p_loss_vol = rearrange(p_loss_vol, "(b v) c h w -> b v c h w", b=bs)
-            p_loss_vol = p_loss_vol.mean()
-            loss = loss + (p_loss_vol * self.loss_args.weight_perceptual_vol)
-            set_loss("perceptual_vol", split, p_loss_vol, self.loss_args.weight_perceptual_vol)
+        # if self.loss_args.weight_perceptual_vol > 0 and iter < iter_end - 1000:
+        #     # Perceptual loss for volume-gs
+        #     p_inp_pred_vol = maybe_resize(
+        #         render_pkg_volume["image"].reshape(-1, 3, self.camera_args.resolution[0], self.camera_args.resolution[1]),
+        #         tgt_reso=self.loss_args.perceptual_resolution
+        #     )
+        #     p_inp_mask_vol = maybe_resize(
+        #         mask_dptm.reshape(-1, 1, self.camera_args.resolution[0], self.camera_args.resolution[1]), 
+        #         tgt_reso=self.loss_args.perceptual_resolution
+        #     )
+        #     p_loss_vol = self.perceptual_loss(p_inp_pred_vol * p_inp_mask_vol, p_inp_gt * p_inp_mask_vol)
+        #     p_loss_vol = rearrange(p_loss_vol, "(b v) c h w -> b v c h w", b=bs)
+        #     p_loss_vol = p_loss_vol.mean()
+        #     loss = loss + (p_loss_vol * self.loss_args.weight_perceptual_vol)
+        #     set_loss("perceptual_vol", split, p_loss_vol, self.loss_args.weight_perceptual_vol)
 
         # ==================== Depth loss ===================== #
         ### Depth loss for omni-gs. For regularization use.
         # depth_m_gt = self.E2C(depth_m_gt).squeeze(2)
         # conf_m_gt = self.E2C(conf_m_gt).squeeze(2)
         if self.loss_args.weight_depth_abs > 0:
-            depth_abs_loss = torch.abs(render_pkg_fuse["depth"] - depth_m_gt)
+            depth_abs_loss = torch.abs(render_pkg_pixel["depth"] - depth_m_gt)
             depth_abs_loss = depth_abs_loss * conf_m_gt
             depth_abs_loss = depth_abs_loss.mean()
             loss = loss + self.loss_args.weight_depth_abs * depth_abs_loss
             set_loss("depth_abs", split, depth_abs_loss, self.loss_args.weight_depth_abs)
         ### Depth loss for volume-gs
-        if self.loss_args.weight_depth_abs_vol > 0 and iter < iter_end - 1000:
-            if self.loss_args.depth_abs_loss_vol_type == "mask":
-                depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt * mask_dptm.unsqueeze(2))
-                depth_abs_loss_vol = depth_abs_loss_vol * conf_m_gt
-            elif self.loss_args.depth_abs_loss_vol_type == "mask_self":
-                depth_m_gt_pseudo = render_pkg_pixel["depth"].detach()
-                depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt_pseudo * mask_dptm.unsqueeze(2))
-            depth_abs_loss_vol = depth_abs_loss_vol.mean()
-            loss = loss + self.loss_args.weight_depth_abs_vol * depth_abs_loss_vol
-            set_loss("depth_abs_vol", split, depth_abs_loss_vol, self.loss_args.weight_depth_abs_vol)
+        # if self.loss_args.weight_depth_abs_vol > 0 and iter < iter_end - 1000:
+        #     if self.loss_args.depth_abs_loss_vol_type == "mask":
+        #         depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt * mask_dptm.unsqueeze(2))
+        #         depth_abs_loss_vol = depth_abs_loss_vol * conf_m_gt
+        #     elif self.loss_args.depth_abs_loss_vol_type == "mask_self":
+        #         depth_m_gt_pseudo = render_pkg_pixel["depth"].detach()
+        #         depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt_pseudo * mask_dptm.unsqueeze(2))
+        #     depth_abs_loss_vol = depth_abs_loss_vol.mean()
+        #     loss = loss + self.loss_args.weight_depth_abs_vol * depth_abs_loss_vol
+        #     set_loss("depth_abs_vol", split, depth_abs_loss_vol, self.loss_args.weight_depth_abs_vol)
         
-        return loss, loss_terms, render_pkg_fuse, render_pkg_pixel, render_pkg_volume, gaussians_all, gaussians_pixel, gaussians_volume, data_dict
-    
+        # return loss, loss_terms, render_pkg_fuse, render_pkg_pixel, render_pkg_volume, gaussians_all, gaussians_pixel, gaussians_volume, data_dict
+        return loss, loss_terms, render_pkg_pixel, render_pkg_pixel, render_pkg_pixel, gaussians_pixel, gaussians_pixel, gaussians_pixel, data_dict
+
     def validation_step(self, batch, val_result_savedir):
         (loss_val, loss_term_val, render_pkg_fuse,
          render_pkg_pixel, render_pkg_volume, gaussians_all,
@@ -406,26 +407,26 @@ class OmniGaussian(BaseModule):
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                     data_dict["rays_o"], data_dict["rays_d"], status="test")
 
-        # volume-gs prediction
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        gaussians_pixel_mask, gaussians_feat_mask = [], []
-        for b in range(bs):
-            mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
-                        (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
-                        (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
-            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-            gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            gaussians_feat_mask.append(gaussians_feat_mask_i)
-        with self.benchmarker.time("volume_gs"):
-            gaussians_volume = self.volume_gs(
-                    [img_feats[0]],
-                    gaussians_pixel_mask,
-                    gaussians_feat_mask,
-                    data_dict["img_metas"], status="test")
+        # # volume-gs prediction
+        # pc_range = self.dataset_params.pc_range
+        # x_start, y_start, z_start, x_end, y_end, z_end = pc_range
+        # gaussians_pixel_mask, gaussians_feat_mask = [], []
+        # for b in range(bs):
+        #     mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
+        #                 (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
+        #                 (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
+        #     gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
+        #     gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
+        #     gaussians_pixel_mask.append(gaussians_pixel_mask_i)
+        #     gaussians_feat_mask.append(gaussians_feat_mask_i)
+        # with self.benchmarker.time("volume_gs"):
+        #     gaussians_volume = self.volume_gs(
+        #             [img_feats[0]],
+        #             gaussians_pixel_mask,
+        #             gaussians_feat_mask,
+        #             data_dict["img_metas"], status="test")
         
-        gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
+        gaussians_all = gaussians_pixel
         bs = gaussians_all.shape[0]
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]

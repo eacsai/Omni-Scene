@@ -49,6 +49,6 @@ class TPVFormerPositionalEncoding(BaseModule):
                 1, 1, self.num_feats[2],
                 device=device).repeat(self.h, self.w, 1)
 
-        pos = torch.cat((h_embed, w_embed, z_embed),
+        pos = torch.cat((w_embed, h_embed, z_embed),
                         dim=-1).flatten(0, 1).unsqueeze(0).repeat(bs, 1, 1)
         return pos

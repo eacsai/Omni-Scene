@@ -173,8 +173,8 @@ class VIGORDataset(Dataset):
         
         ### input_dict_vol
         # w2i [6, 4, 4]
-        input_dict_vol = {"w2i": input_c2ws}
-        # input_dict_vol = {"w2i": self.extrinsics}
+        # input_dict_vol = {"w2i": input_c2ws}
+        input_dict_vol = {"w2i": self.extrinsics}
         ### output_dict
         # rgb [18, 3, 224, 400]
         # depth [18, 224, 400]
@@ -186,29 +186,29 @@ class VIGORDataset(Dataset):
         # rays_o.shape [18, 224, 400, 3]
         # rays_d.shape [18, 224, 400, 3]
              
-        output_dict = {
-            "rgb": grd, 
-            "depth": depth_img,
-            "depth_m": depth_img, 
-            "conf_m": confs_img,
-            "c2w": input_c2ws, 
-            "fovx": output_fovxs, 
-            "fovy": output_fovys, 
-            "rays_o": output_rays_o,
-            "rays_d": output_rays_d, 
-        }
-
         # output_dict = {
         #     "rgb": grd, 
         #     "depth": depth_img,
         #     "depth_m": depth_img, 
         #     "conf_m": confs_img,
-        #     "c2w": torch.inverse(self.extrinsics), 
+        #     "c2w": input_c2ws, 
         #     "fovx": output_fovxs, 
         #     "fovy": output_fovys, 
         #     "rays_o": output_rays_o,
         #     "rays_d": output_rays_d, 
         # }
+
+        output_dict = {
+            "rgb": grd, 
+            "depth": depth_img,
+            "depth_m": depth_img, 
+            "conf_m": confs_img,
+            "c2w": torch.inverse(self.extrinsics), 
+            "fovx": output_fovxs, 
+            "fovy": output_fovys, 
+            "rays_o": output_rays_o,
+            "rays_d": output_rays_d, 
+        }
         
 
         return {

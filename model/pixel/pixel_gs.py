@@ -148,9 +148,10 @@ class PixelGaussian(BaseModule):
         img_feats = rearrange(img_feats, "b v h w c -> (b v) c h w")
 
         # rearrange pseudo depths and confs
-        depths_in = rearrange(depths_in, "b v h w -> (b v) () h w")
-        confs_in = rearrange(confs_in, "b v h w -> (b v) () h w")
-        img_feats = torch.cat([img_feats, depths_in / 20.0, confs_in], dim=1)
+        depths_in = rearrange(depths_in, "b v c h w -> (b v) c h w")
+        confs_in = rearrange(confs_in, "b v c h w -> (b v) c h w")
+        depth_scale = 2.0 # 20.0 outdoor
+        img_feats = torch.cat([img_feats, depths_in / depth_scale, confs_in], dim=1)
 
         # downsample
         sample = img_feats

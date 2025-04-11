@@ -3,7 +3,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_nusc_novelview_r50_224x400"
+exp_name = "omni_gs_cube_160x320"
 output_dir = "workdirs"
 
 lr = 1e-4
@@ -16,7 +16,7 @@ save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
 max_train_steps = 5000
-warmup_steps = 1000
+warmup_steps = 100
 mixed_precision = "no"
 gradient_accumulation_steps = 1
 resume_from = "latest"
@@ -29,7 +29,7 @@ use_center, use_first, use_last = True, False, False
 # resolution = [160, 320]
 resolution = [80, 80]
 # point_cloud_range = [-50.0, -50.0, -3.0, 50.0, 50.0, 12.0]
-point_cloud_range = [-30.0, -20.0, -30.0, 30.0, 3.0, 30.0]
+point_cloud_range = [-30.0, -30.0, -30.0, 30.0, 3.0, 30.0]
 dataset_params = dict(
     dataset_name="nuScenesDataset",
     seed=seed,
@@ -85,8 +85,8 @@ patch_sizes=[8, 8, 4, 2]
 _ffn_dim_ = _dim_ * 2
 
 tpv_h_ = 16
-tpv_w_ = 128
-tpv_z_ = 128
+tpv_w_ = 64
+tpv_z_ = 64
 scale_h = 1
 scale_w = 1
 scale_z = 1
