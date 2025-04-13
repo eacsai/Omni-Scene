@@ -22,7 +22,19 @@ from .utils.interpolation import interpolate_extrinsics
 from pano2cube import Equirec2Cube, Cube2Equirec
 from vis_feat import single_features_to_RGB
 import torchvision.transforms as transforms
+import matplotlib.cm as cm
+import cv2
+
 to_pil_image = transforms.ToPILImage()
+
+def onlyDepth(depth, save_name):
+    cmap = cm.Spectral
+    depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+    depth = depth.cpu().detach().numpy()
+    depth = depth.astype(np.uint8)
+    
+    c_depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+    cv2.imwrite(save_name, c_depth)
 
 @MODELS.register_module()
 class OmniGaussian(BaseModule):
@@ -298,15 +310,22 @@ class OmniGaussian(BaseModule):
         data_dict["mask_dptm"] = mask_dptm
 
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d_pixel.png')
-        # test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        # test_img.save('render_fuse_mp3d.png')
-        # test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        # test_img.save('render_volume_mp3d.png')
+        test_img.save('render_pixel_mp3d_pixel_0.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_pixel.png')
+        test_img.save('render_gt_mp3d_pixel_0.png')
+        test_img = to_pil_image(render_pkg_pixel["image"][0,1].clip(min=0, max=1))    
+        test_img.save('render_pixel_mp3d_pixel_1.png')
+        test_img = to_pil_image(rgb_gt[0,1].clip(min=0, max=1))    
+        test_img.save('render_gt_mp3d_pixel_1.png')
+        test_img = to_pil_image(render_pkg_pixel["image"][0,2].clip(min=0, max=1))    
+        test_img.save('render_pixel_mp3d_pixel_2.png')
+        test_img = to_pil_image(rgb_gt[0,2].clip(min=0, max=1))    
+        test_img.save('render_gt_mp3d_pixel_2.png')
+        
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
         test_img.save('render_bev_mp3d_pixel.png')
+
+        onlyDepth(depth_m_gt[0,1,0], 'grd_depth.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
             # RGB loss for omni-gs

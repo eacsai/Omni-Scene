@@ -27,3 +27,7 @@ python train_mp3d.py \
 python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_trans.py \
     --work-dir workdirs/omni_gs_160x320_mp3d_trans
+
+python train_360Loc.py \
+    --py-config configs/OmniScene/omni_gs_160x320_360Loc_pixel.py \
+    --work-dir workdirs/omni_gs_160x320_360Loc_pixel
