@@ -3,7 +3,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_pixel"
+exp_name = "omni_gs_160x320_mp3d_pixel_double"
 output_dir = "workdirs"
 
 lr = 1e-4
@@ -19,7 +19,7 @@ max_train_steps = 5000
 warmup_steps = 1000
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "latest"
+resume_from = False
 report_to = "tensorboard"
 
 volume_only = False
@@ -29,7 +29,7 @@ use_center, use_first, use_last = True, False, False
 resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-50.0, -50.0, -3.0, 50.0, 50.0, 12.0]
-point_cloud_range = [-10.0, -2.5, -10.0, 10.0, 2.5, 10.0]
+point_cloud_range = [-60.0, -20.0, -60.0, 60.0, 5.0, 60.0]
 dataset_params = dict(
     dataset_name="mp3d",
     seed=seed,
@@ -46,7 +46,7 @@ dataset_params = dict(
     num_workers_test=32
 )
 
-num_cams = 1
+num_cams = 2
 near = 0.1
 far = 15.0
 camera_args = dict(
@@ -85,12 +85,12 @@ patch_sizes=[8, 8, 4, 2]
 _ffn_dim_ = _dim_ * 2
 
 tpv_h_ = 16
-tpv_w_ = 32
-tpv_z_ = 32
+tpv_w_ = 128
+tpv_z_ = 128
 scale_h = 1
 scale_w = 1
 scale_z = 1
-gpv = 3
+gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
 # num_points = [16, 32, 32]

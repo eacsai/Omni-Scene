@@ -265,8 +265,7 @@ class TPVFormerEncoder(TransformerLayerSequence):
         return reference_points_cam, tpv_mask
 
     def pano_point_sampling(self, reference_points, pc_range, img_metas):
-        # TODO change to panorama
-        h, w = list(img_metas[0]["img_shape"])[0]
+        # init reference_points
         reference_points = reference_points.clone()
         reference_points[..., 0:1] = reference_points[..., 0:1] * \
             (pc_range[3] - pc_range[0]) + pc_range[0]
@@ -277,14 +276,31 @@ class TPVFormerEncoder(TransformerLayerSequence):
         eps = 1e-5
         B = len(img_metas)
         B_ref, D, num_query, _ = reference_points.shape
-        reference_points = reference_points.repeat(B, 1, 1, 1).view(B*D, num_query, -1)
+        
+        # init lidar2img
+        lidar2img = []
+        for img_meta in img_metas:
+            lidar2img.append(img_meta["lidar2img"])
+        lidar2img = torch.stack(lidar2img)
+        lidar2img = lidar2img[:,:,None,None,:,:].repeat(1,1,D,num_query,1,1)
+        num_cams = lidar2img.shape[1]
+
+        # get reference_points
+        reference_points = reference_points.unsqueeze(0).repeat(B // B_ref, num_cams, 1, 1, 1)
+        ones = torch.ones_like(reference_points[..., :1], device=reference_points.device, dtype=reference_points.dtype)
+        reference_points_homogeneous = torch.cat((reference_points, ones), dim=-1)
+        w2c = torch.inverse(lidar2img)
+        P_cam_homogeneous = torch.matmul(w2c, reference_points_homogeneous.unsqueeze(-1))
+        P_cam_homogeneous = P_cam_homogeneous.squeeze(-1)
+        w_prime = P_cam_homogeneous[..., 3:]
+        reference_points = P_cam_homogeneous[..., :3] / (w_prime + eps)
+
         x = reference_points[...,0:1]
         y = reference_points[...,1:2]
         z = reference_points[...,2:3]
         theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
         phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
-        reference_points_cam = torch.cat((theta, phi), dim=-1).view(B, D, num_query, -1)
-        reference_points_cam = reference_points_cam.permute(0,2,1,3).unsqueeze(0)
+        reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4)
 
         tpv_mask = (
             (reference_points_cam[..., 1:2] > 0.0)
@@ -292,8 +308,7 @@ class TPVFormerEncoder(TransformerLayerSequence):
             & (reference_points_cam[..., 0:1] < 1.0)
             & (reference_points_cam[..., 0:1] > 0.0))
 
-        tpv_mask = torch.nan_to_num(tpv_mask)
-        tpv_mask = tpv_mask.squeeze(-1)
+        tpv_mask = torch.nan_to_num(tpv_mask).squeeze(-1)
 
         return reference_points_cam, tpv_mask
 

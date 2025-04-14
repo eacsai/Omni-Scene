@@ -18,15 +18,19 @@ python train_vigor.py \
 
 python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d.py \
-    --work-dir workdirs/omni_gs_160x320_mp3d
+    --work-dir workdirs/omni_gs_160x320_mp3d_new
 
 python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_pixel.py \
     --work-dir workdirs/omni_gs_160x320_mp3d_pixel
 
 python train_mp3d.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d_trans.py \
-    --work-dir workdirs/omni_gs_160x320_mp3d_trans
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_pixel.py \
+    --work-dir workdirs/omni_gs_160x320_mp3d_pixel_double
+
+python train_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d.py \
+    --work-dir workdirs/omni_gs_160x320_mp3d_double
 
 python train_360Loc.py \
     --py-config configs/OmniScene/omni_gs_160x320_360Loc_pixel.py \

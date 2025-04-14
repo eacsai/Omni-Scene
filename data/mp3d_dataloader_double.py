@@ -85,7 +85,7 @@ class DatasetMP3D(Dataset):
 
         # Load the images.
         rgbs_path = [str(scene_path / v / 'rgb.png') for v in views]
-        context_indices = torch.tensor([1])
+        context_indices = torch.tensor([0, 2])
         target_indices = torch.tensor([0, 1, 2])
         context_images = [rgbs_path[i] for i in context_indices]
         target_images = [rgbs_path[i] for i in target_indices]

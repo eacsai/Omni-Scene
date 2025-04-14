@@ -1,6 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -20,6 +20,7 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
 
 from data.mp3d_dataloader import load_MP3D_data
+# from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
 import warnings

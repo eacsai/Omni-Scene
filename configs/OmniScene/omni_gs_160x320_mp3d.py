@@ -3,7 +3,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d"
+exp_name = "omni_gs_160x320_mp3d_double"
 output_dir = "workdirs"
 
 lr = 1e-4
@@ -19,7 +19,7 @@ max_train_steps = 5000
 warmup_steps = 1000
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "latest"
+resume_from = False
 report_to = "tensorboard"
 
 volume_only = False
@@ -29,7 +29,7 @@ use_center, use_first, use_last = True, False, False
 resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-50.0, -50.0, -3.0, 50.0, 50.0, 12.0]
-point_cloud_range = [-20.0, -2.5, -20.0, 20.0, 2.5, 20.0]
+point_cloud_range = [-60.0, -20.0, -60.0, 60.0, 5.0, 60.0]
 dataset_params = dict(
     dataset_name="nuScenesDataset",
     seed=seed,
@@ -90,7 +90,7 @@ tpv_z_ = 128
 scale_h = 1
 scale_w = 1
 scale_z = 1
-gpv = 3
+gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
 # num_points = [16, 32, 32]
@@ -117,7 +117,7 @@ self_cross_layer = dict(
         dict(
             type='TPVImageCrossAttention',
             pc_range=point_cloud_range,
-            num_cams=1,
+            num_cams=num_cams,
             dropout=0.1,
             deformable_attention=dict(
                 type='TPVMSDeformableAttention3D',
@@ -225,7 +225,7 @@ model = dict(
             num_feature_levels=1,
             num_layers=3,
             pc_range=point_cloud_range,
-            num_cams=1,
+            num_cams=num_cams,
             num_points_in_pillar=num_points_in_pillar,
             num_points_in_pillar_cross_view=[16, 16, 16],
             return_intermediate=False,
