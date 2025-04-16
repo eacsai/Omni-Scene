@@ -200,6 +200,9 @@ class TPVCrossViewHybridAttention(BaseModule):
             output = multi_scale_deformable_attn_pytorch(
                 value, spatial_shapes, sampling_locations, attention_weights)
 
+        # output = multi_scale_deformable_attn_pytorch(
+        #                 value, spatial_shapes, sampling_locations, attention_weights)
+
         outputs = self.reshape_output(output, query_lens)
 
         results = []

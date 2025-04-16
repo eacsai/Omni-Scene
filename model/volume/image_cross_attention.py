@@ -461,6 +461,9 @@ class TPVMSDeformableAttention3D(BaseModule):
             output = multi_scale_deformable_attn_pytorch(
                 value, spatial_shapes, sampling_locations, attention_weights)
 
+        # output = multi_scale_deformable_attn_pytorch(
+        #         value, spatial_shapes, sampling_locations, attention_weights)
+
         output = self.reshape_output(output, query_lens)
         if not self.batch_first:
             output = [o.permute(1, 0, 2) for o in output]

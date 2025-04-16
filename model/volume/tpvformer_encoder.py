@@ -193,10 +193,15 @@ class TPVFormerEncoder(TransformerLayerSequence):
         """
 
         # reference points in 3D space, used in spatial cross-attention (SCA)
+        # zs = torch.linspace(
+        #     0.5, Z - 0.5, num_points_in_pillar,
+        #     dtype=dtype, device=device).view(-1, 1, 1).expand(
+        #         num_points_in_pillar, H, W) / Z
+        
         zs = torch.linspace(
-            0.5, Z - 0.5, num_points_in_pillar,
+            0.01, 0.99, num_points_in_pillar,
             dtype=dtype, device=device).view(-1, 1, 1).expand(
-                num_points_in_pillar, H, W) / Z
+                num_points_in_pillar, H, W)
         xs = torch.linspace(
             0.5, W - 0.5, W, dtype=dtype, device=device).view(1, 1, -1).expand(
                 num_points_in_pillar, H, W) / W
@@ -312,6 +317,22 @@ class TPVFormerEncoder(TransformerLayerSequence):
 
         return reference_points_cam, tpv_mask
 
+    def pano_point_sampling_spherical(self, reference_points, pc_range, img_metas):
+        B = len(img_metas)
+        # init reference_points
+        reference_points = reference_points.clone().permute(0,2,1,3).repeat(B, 1, 1, 1).unsqueeze(0)
+        reference_points_cam = reference_points[..., :2]
+
+        tpv_mask = (
+            (reference_points_cam[..., 1:2] > 0.0)
+            & (reference_points_cam[..., 1:2] < 1.0)
+            & (reference_points_cam[..., 0:1] < 1.0)
+            & (reference_points_cam[..., 0:1] > 0.0))
+
+        tpv_mask = torch.nan_to_num(tpv_mask).squeeze(-1)
+
+        return reference_points_cam, tpv_mask
+
     def forward(self, mlvl_feats, project_feats, img_metas):
         """Forward function.
 
@@ -372,7 +393,7 @@ class TPVFormerEncoder(TransformerLayerSequence):
         reference_points_cams, tpv_masks = [], []
         ref_3ds = [self.ref_3d_hw, self.ref_3d_zh, self.ref_3d_wz]
         for ref_3d in ref_3ds:
-            reference_points_cam, tpv_mask = self.pano_point_sampling(
+            reference_points_cam, tpv_mask = self.pano_point_sampling_spherical(
                 ref_3d, self.pc_range,
                 img_metas)  # num_cam, bs, hw++, #p, 2
             reference_points_cams.append(reference_points_cam)

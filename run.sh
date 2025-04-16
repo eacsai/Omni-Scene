@@ -29,8 +29,12 @@ python train_mp3d.py \
     --work-dir workdirs/omni_gs_160x320_mp3d_pixel_double
 
 python train_mp3d.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d.py \
-    --work-dir workdirs/omni_gs_160x320_mp3d_double
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical
+
+python train_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross
 
 python train_360Loc.py \
     --py-config configs/OmniScene/omni_gs_160x320_360Loc_pixel.py \

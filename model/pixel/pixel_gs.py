@@ -32,13 +32,18 @@ class PixelGaussian(BaseModule):
                  near=0.1,
                  far=1000.0,
                  use_checkpoint=False,
+                 tpv_h=32,
+                 tpv_w=64,
+                 tpv_z=64,
                  **kwargs,
                  ):
 
         super().__init__()
 
         self.use_checkpoint = use_checkpoint
-
+        self.tpv_h = tpv_h
+        self.tpv_w = tpv_w
+        self.tpv_z = tpv_z
         self.plucker_to_embed = nn.Linear(6, out_embed_dims[0])
         self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, out_embed_dims[0]))
         
@@ -102,7 +107,7 @@ class PixelGaussian(BaseModule):
             nn.GELU(),
         )
 
-        gs_channels = 3 + 1 + 3 + 4 + 3 # offset, opacity, scale, rotation, rgb
+        gs_channels = 1 + 1 + 3 + 4 + 3 # offset, opacity, scale, rotation, rgb
         self.gs_channels = gs_channels
         self.feature_norm = nn.GroupNorm(num_channels=out_embed_dims[0], num_groups=32, eps=1e-6)
         self.to_gaussians = nn.Sequential(
@@ -189,11 +194,11 @@ class PixelGaussian(BaseModule):
         gaussians = self.to_gaussians(features)
         gaussians = rearrange(gaussians, "(b v) (n c) h w -> b (v h w n) c",
                               b=bs, v=self.num_cams, n=1, c=self.gs_channels)
-        offsets = gaussians[..., :3]
-        opacities = self.opt_act(gaussians[..., 3:4])
-        scales = self.scale_act(gaussians[..., 4:7])
-        rotations = self.rot_act(gaussians[..., 7:11])
-        rgbs = self.rgb_act(gaussians[..., 11:14])
+        offsets = gaussians[..., :1]
+        opacities = self.opt_act(gaussians[..., 1:2])
+        scales = self.scale_act(gaussians[..., 2:5])
+        rotations = self.rot_act(gaussians[..., 5:9])
+        rgbs = self.rgb_act(gaussians[..., 9:12])
 
         depths_in = rearrange(depths_in, "(b v) c h w-> b (v h w) c", b=bs, v=self.num_cams)
 
@@ -201,13 +206,22 @@ class PixelGaussian(BaseModule):
         origins = origins.unsqueeze(-2)
         directions = rearrange(directions, "b v h w c -> b (v h w) c")
         directions = directions.unsqueeze(-2)
-        means = origins + directions * depths_in[..., None]
+        depth_pred = (depths_in + offsets).clamp(min=0.0)
+        means = origins + directions * depth_pred[..., None]
         means = rearrange(means, "b r n c -> b (r n) c")
-        means = means + offsets
+        # means = means + offsets
 
         gaussians = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
         features = rearrange(features, "(b v) c h w -> b (v h w) c", b=bs, v=self.num_cams)
         features = features.unsqueeze(2) # b v*h*w n c
         features = rearrange(features, "b r n c -> b (r n) c")
 
-        return gaussians, features
+        u = torch.linspace(0.5, self.tpv_w-0.5, w).to(self.device)  # horizontal coordinate (left=-1, right=+1)
+        v = torch.linspace(0.5, self.tpv_h-0.5, h).to(self.device)  # vertical coordinate (top=-1, bottom=1)
+        # Note: v is reversed so that +1 corresponds to top (north pole) and -1 to bottom (south).
+        # Meshgrid to get coordinate matrix for face
+        v_map, u_map = torch.meshgrid(v, u, indexing='ij')  # shape (face_w, face_w)
+        # u_map = u_map.int().view(-1)
+        # v_map = v_map.int().view(-1)
+        uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2).unsqueeze(0).repeat(bs,1,1)
+        return gaussians, features, depth_pred, uv_map

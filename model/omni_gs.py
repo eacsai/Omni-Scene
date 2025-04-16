@@ -188,11 +188,14 @@ class OmniGaussian(BaseModule):
         """
         data_dict = self.get_data(batch)
         img = data_dict["imgs"]
+        # test_img = to_pil_image(img[0,0].clip(min=0, max=1))    
+        # test_img.save('input_img.png')
+
         bs = img.shape[0]
         img_feats = self.extract_img_feat(img=img)
 
         # pixel-gs prediction
-        gaussians_pixel, gaussians_feat = self.pixel_gs(
+        gaussians_pixel, gaussians_feat, depth_pred, uv_map = self.pixel_gs(
                 rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"])
@@ -200,19 +203,39 @@ class OmniGaussian(BaseModule):
         # volume-gs prediction
         pc_range = self.dataset_params.pc_range
         x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        gaussians_pixel_mask, gaussians_feat_mask = [], []
+        gaussians_pixel_mask, gaussians_feat_mask, uv_map_mask, depth_pred_mask = [], [], [], []
+
+        # decare
+        # for b in range(bs):
+        #     mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
+        #                 (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
+        #                 (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
+        #     gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
+        #     gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
+        #     gaussians_pixel_mask.append(gaussians_pixel_mask_i)
+        #     gaussians_feat_mask.append(gaussians_feat_mask_i)
+
+        # Spherical
         for b in range(bs):
-            mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
-                        (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
-                        (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
+            mask_pixel_i = (depth_pred[b, :, 0] > z_start) & (depth_pred[b, :, 0] <= z_end)
+
             gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
             gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
+            uv_map_i = uv_map[b][mask_pixel_i]
+            depth_pred_i = depth_pred[b][mask_pixel_i]
+
             gaussians_pixel_mask.append(gaussians_pixel_mask_i)
             gaussians_feat_mask.append(gaussians_feat_mask_i)
+            uv_map_mask.append(uv_map_i)
+            depth_pred_mask.append(depth_pred_i)
+        
+        # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         gaussians_volume = self.volume_gs(
                 [img_feats[0]],
                 gaussians_pixel_mask,
                 gaussians_feat_mask,
+                uv_map_mask,
+                depth_pred_mask,
                 data_dict["img_metas"])
         
         gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
@@ -289,10 +312,11 @@ class OmniGaussian(BaseModule):
             mask_dptm = mask_dptm & (depth_for_mask[..., 0] > 0.1)
             mask_dptm = mask_dptm.float()
         elif self.loss_args.mask_dptm and self.loss_args.recon_loss_vol_type == "l2_mask":
-            output_positions = data_dict["output_positions"]
-            mask_dptm = (output_positions[..., 0] >= x_start) & (output_positions[..., 0] <= x_end) & \
-                        (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
-                        (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
+            # output_positions = data_dict["output_positions"]
+            # mask_dptm = (output_positions[..., 0] >= x_start) & (output_positions[..., 0] <= x_end) & \
+            #             (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
+            #             (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
+            mask_dptm = (data_dict["output_depths_m"].squeeze(2) >= z_start) & (data_dict["output_depths_m"].squeeze(2) <= z_end)
             mask_dptm = mask_dptm.float()
         # mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm

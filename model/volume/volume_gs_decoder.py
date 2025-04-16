@@ -39,24 +39,26 @@ class VolumeGaussianDecoder(BaseModule):
         # set activations
         # TODO check if optimal
         self.pos_act = lambda x: torch.tanh(x)
-        if offset_max is None:
-            self.offset_max = [1.0] * 3 # meters
-        else:
-            self.offset_max = offset_max
-        # self.offset_max = [1.0] * 3
+        # if offset_max is None:
+        #     self.offset_max = [1.0] * 3 # meters
+        # else:
+        #     self.offset_max = offset_max
+        self.offset_max = [1.0] * 3
         #self.scale_act = lambda x: sigmoid_scaling(x, lower_bound=0.005, upper_bound=0.02)
-        if scale_max is None:
-            self.scale_max = [1.0] * 3 # meters
-        else:
-            self.scale_max = scale_max
-        # self.scale_max = [1.0] * 3 
+        # if scale_max is None:
+        #     self.scale_max = [1.0] * 3 # meters
+        # else:
+        #     self.scale_max = scale_max
+        self.scale_max = [1.0] * 3 
         self.scale_act = lambda x: torch.sigmoid(x)
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = lambda x: torch.sigmoid(x)
 
         # obtain anchor points for gaussians
-        gs_anchors = self.get_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
+        # gs_anchors = self.get_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
+        gs_anchors = self.get_panorama_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
+
         self.register_buffer('gs_anchors', gs_anchors)
     
     @staticmethod
@@ -85,6 +87,40 @@ class VolumeGaussianDecoder(BaseModule):
         ref_3d[..., 0:1] = ref_3d[..., 0:1] * (pc_range[3] - pc_range[0]) + pc_range[0]
         ref_3d[..., 1:2] = ref_3d[..., 1:2] * (pc_range[4] - pc_range[1]) + pc_range[1]
         ref_3d[..., 2:3] = ref_3d[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
+        ref_3d = ref_3d[None].repeat(bs, 1, 1, 1, 1) # b, w, h, z, 3
+        return ref_3d
+    
+    @staticmethod
+    def get_panorama_reference_points(H, W, Z, pc_range, dim='3d', bs=1, device='cuda', dtype=torch.float):
+        """Get the reference points used in spatial cross-attn and self-attn.
+        Args:
+            H, W: spatial shape of tpv plane.
+            Z: hight of pillar.
+            D: sample D points uniformly from each pillar.
+            device (obj:`device`): The device where
+                reference_points should be.
+        Returns:
+            Tensor: reference points used in decoder, has \
+                shape (bs, num_keys, num_levels, 2).
+        """
+
+        # reference points in 3D space
+        rs = (pc_range[5] - pc_range[2]) * torch.linspace(0.5, Z - 0.5, Z, dtype=dtype,
+                            device=device).view(-1, 1, 1).expand(Z, H, W) / Z
+        thetas = 2 * torch.pi * torch.linspace(0.5, W - 0.5, W, dtype=dtype,
+                            device=device).view(1, 1, -1).expand(Z, H, W) / W
+        phis = torch.pi * torch.linspace(0.5, H - 0.5, H, dtype=dtype,
+                            device=device).view(1, -1, 1).expand(Z, H, W) / H
+        
+        xs = -torch.sin(phis) * torch.sin(thetas) * rs
+        ys = -torch.cos(phis) * rs
+        zs = -torch.sin(phis) * torch.cos(thetas) * rs
+
+        ref_3d = torch.stack((xs, ys, zs), -1)
+        ref_3d = ref_3d.permute(2, 1, 0, 3) # w, h, z, 3
+        # ref_3d[..., 0:1] = ref_3d[..., 0:1] * (pc_range[3] - pc_range[0]) + pc_range[0]
+        # ref_3d[..., 1:2] = ref_3d[..., 1:2] * (pc_range[4] - pc_range[1]) + pc_range[1]
+        # ref_3d[..., 2:3] = ref_3d[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
         ref_3d = ref_3d[None].repeat(bs, 1, 1, 1, 1) # b, w, h, z, 3
         return ref_3d
     

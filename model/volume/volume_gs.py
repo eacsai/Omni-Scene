@@ -6,7 +6,7 @@ from mmengine.model import BaseModule
 from mmengine.registry import MODELS
 import warnings
 from einops import rearrange
-
+from vis_feat import single_features_to_RGB
 
 @MODELS.register_module()
 class VolumeGaussian(BaseModule):
@@ -39,7 +39,7 @@ class VolumeGaussian(BaseModule):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, img_feats, candidate_gaussians, candidate_feats, img_metas=None, status="train"):
+    def forward(self, img_feats, candidate_gaussians, candidate_feats, candidate_uv_map, candidate_depth_pred,img_metas=None, status="train"):
         """Forward training function.
         """
         if candidate_gaussians is not None and candidate_feats is not None:
@@ -50,10 +50,18 @@ class VolumeGaussian(BaseModule):
             project_feats_wz = candidate_feats[0].new_zeros((bs, self.tpv_w, self.tpv_z, c))
 
             for i in range(bs):
-                candidate_xyzs_i = candidate_gaussians[i][..., :3]
-                candidate_hs_i = (self.tpv_h * (candidate_xyzs_i[..., 1] - self.pc_range[1]) / self.pc_yrange - 0.5).int()
-                candidate_ws_i = (self.tpv_w * (candidate_xyzs_i[..., 0] - self.pc_range[0]) / self.pc_xrange - 0.5).int()
-                candidate_zs_i = (self.tpv_z * (candidate_xyzs_i[..., 2] - self.pc_range[2]) / self.pc_zrange - 0.5).int()
+                # candidate_xyzs_i = candidate_gaussians[i][..., :3]
+                
+                # Decare
+                # candidate_hs_i = (self.tpv_h * (candidate_xyzs_i[..., 1] - self.pc_range[1]) / self.pc_yrange - 0.5).int()
+                # candidate_ws_i = (self.tpv_w * (candidate_xyzs_i[..., 0] - self.pc_range[0]) / self.pc_xrange - 0.5).int()
+                # candidate_zs_i = (self.tpv_z * (candidate_xyzs_i[..., 2] - self.pc_range[2]) / self.pc_zrange - 0.5).int()
+                
+                # Spherical
+                eps = 1e-8
+                candidate_hs_i = candidate_uv_map[i][:, 1]
+                candidate_ws_i = candidate_uv_map[i][:, 0]
+                candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - 0.5).int()
                 # n, c
                 #candidate_feats_i = candidate_feats[[i, valid_mask]]
                 candidate_feats_i = candidate_feats[i]
@@ -99,6 +107,10 @@ class VolumeGaussian(BaseModule):
             project_feats = [project_feats_hw, project_feats_zh, project_feats_wz]
         else:
             project_feats = [None, None, None]
+
+        # single_features_to_RGB(project_feats_hw, img_name='feat_hw.png')
+        # single_features_to_RGB(project_feats_zh, img_name='feat_zh.png')
+        # single_features_to_RGB(project_feats_wz, img_name='feat_wz.png')
 
         if self.use_checkpoint and status != "test":
             input_vars_enc = (img_feats, project_feats, img_metas)
