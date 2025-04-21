@@ -36,6 +36,21 @@ python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross
 
+python train_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_decare.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_decare
+
 python train_360Loc.py \
     --py-config configs/OmniScene/omni_gs_160x320_360Loc_pixel.py \
     --work-dir workdirs/omni_gs_160x320_360Loc_pixel
+
+
+python evaluate_mp3d.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_decare.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_decare" \
+    --load-from "checkpoint-6000"
+
+python evaluate_mp3d.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d" \
+    --load-from "checkpoint-3000"

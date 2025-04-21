@@ -1,3 +1,5 @@
+import math
+
 _base_ = [
     './_base_/optimizer.py',
     './_base_/schedule.py',
@@ -16,7 +18,7 @@ save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
 max_train_steps = 5000
-warmup_steps = 1000
+warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
 resume_from = False
@@ -29,7 +31,18 @@ use_center, use_first, use_last = True, False, False
 resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
-point_cloud_range = [0.0, 0.0, 0.0, 64.0, 32.0, 10.0] # 
+task = 'spherical' # 'spherical' or 'square'
+if task == 'spherical':
+    point_cloud_range = [0.0, 0.0, 0.0, 64.0, 32.0, 8.0] #
+    scale_h = 1
+    scale_w = 1
+    scale_z = 1
+else:
+    point_cloud_range = [-10.0, -3.0, -10.0, 10.0, 3.0, 10.0]
+    scale_h = 0.25
+    scale_w = 0.5
+    scale_z = 2
+
 dataset_params = dict(
     dataset_name="nuScenesDataset",
     seed=seed,
@@ -56,8 +69,8 @@ camera_args = dict(
 )
 
 eval_args = dict(
-    save_vis=False,
-    save_ply=False
+    save_vis=True,
+    save_ply=True
 )
 
 loss_args = dict(
@@ -84,12 +97,9 @@ num_layers = 1
 patch_sizes=[8, 8, 4, 2]
 _ffn_dim_ = _dim_ * 2
 
-tpv_h_ = 32   # phi
-tpv_w_ = 64  # theta
-tpv_z_ = 24  # r
-scale_h = 1
-scale_w = 1
-scale_z = 1
+tpv_h_ = 64   # phi
+tpv_w_ = 128  # theta
+tpv_z_ = 32  # r
 gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
@@ -163,6 +173,7 @@ self_layer = dict(
 model = dict(
     type='OmniGaussian',
     use_checkpoint=use_checkpoint,
+    task=task,
     with_pixel=True,
     volume_only=volume_only,
     backbone=dict(
@@ -258,8 +269,9 @@ model = dict(
             scale_w=scale_w,
             scale_z=scale_z,
             gpv=gpv,
-            offset_max=[2 * pc_xrange / (tpv_w_*scale_w), 2 * pc_yrange / (tpv_h_*scale_h), 2 * pc_zrange / (tpv_z_*scale_z)],
-            scale_max=[2 * pc_xrange / (tpv_w_*scale_w), 2 * pc_yrange / (tpv_h_*scale_h), 2 * pc_zrange / (tpv_z_*scale_z)]
+            offset_max=[2 * math.pi / (tpv_w_*scale_w), math.pi / (tpv_h_*scale_h), pc_zrange / (tpv_z_*scale_z)],
+            scale_max=[2 * math.pi / (tpv_w_*scale_w), math.pi / (tpv_h_*scale_h), pc_zrange / (tpv_z_*scale_z)],
+            task=task
         )
     ),
     camera_args=camera_args,

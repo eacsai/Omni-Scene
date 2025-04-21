@@ -11,7 +11,7 @@ from einops import rearrange
 
 
 @MODELS.register_module()
-class TPVFormerEncoder(TransformerLayerSequence):
+class TPVFormerEncoderOriginal(TransformerLayerSequence):
 
     def __init__(self,
                  tpv_h=200,
@@ -294,8 +294,7 @@ class TPVFormerEncoder(TransformerLayerSequence):
         reference_points = reference_points.unsqueeze(0).repeat(B // B_ref, num_cams, 1, 1, 1)
         ones = torch.ones_like(reference_points[..., :1], device=reference_points.device, dtype=reference_points.dtype)
         reference_points_homogeneous = torch.cat((reference_points, ones), dim=-1)
-        w2c = torch.inverse(lidar2img)
-        P_cam_homogeneous = torch.matmul(w2c, reference_points_homogeneous.unsqueeze(-1))
+        P_cam_homogeneous = torch.matmul(lidar2img, reference_points_homogeneous.unsqueeze(-1))
         P_cam_homogeneous = P_cam_homogeneous.squeeze(-1)
         w_prime = P_cam_homogeneous[..., 3:]
         reference_points = P_cam_homogeneous[..., :3] / (w_prime + eps)
@@ -393,12 +392,12 @@ class TPVFormerEncoder(TransformerLayerSequence):
         reference_points_cams, tpv_masks = [], []
         ref_3ds = [self.ref_3d_hw, self.ref_3d_zh, self.ref_3d_wz]
         for ref_3d in ref_3ds:
-            reference_points_cam, tpv_mask = self.pano_point_sampling_spherical(
-                ref_3d, self.pc_range,
-                img_metas)  # num_cam, bs, hw++, #p, 2
-            # reference_points_cam, tpv_mask = self.pano_point_sampling(
+            # reference_points_cam, tpv_mask = self.pano_point_sampling_spherical(
             #     ref_3d, self.pc_range,
             #     img_metas)  # num_cam, bs, hw++, #p, 2
+            reference_points_cam, tpv_mask = self.pano_point_sampling(
+                ref_3d, self.pc_range,
+                img_metas)  # num_cam, bs, hw++, #p, 2
             reference_points_cams.append(reference_points_cam)
             tpv_masks.append(tpv_mask)
 

@@ -3,8 +3,8 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_double"
-output_dir = "workdirs"
+exp_name = "omni_gs_160x320_mp3d"
+output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
 grad_max_norm = 1.0
@@ -29,7 +29,7 @@ use_center, use_first, use_last = True, False, False
 resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-50.0, -50.0, -3.0, 50.0, 50.0, 12.0]
-point_cloud_range = [-60.0, -20.0, -60.0, 60.0, 5.0, 60.0]
+point_cloud_range = [-10.0, -2.5, -10.0, 10.0, 2.5, 10.0]
 dataset_params = dict(
     dataset_name="nuScenesDataset",
     seed=seed,
@@ -56,8 +56,8 @@ camera_args = dict(
 )
 
 eval_args = dict(
-    save_vis=False,
-    save_ply=False
+    save_vis=True,
+    save_ply=True
 )
 
 loss_args = dict(
@@ -85,8 +85,8 @@ patch_sizes=[8, 8, 4, 2]
 _ffn_dim_ = _dim_ * 2
 
 tpv_h_ = 16
-tpv_w_ = 128
-tpv_z_ = 128
+tpv_w_ = 64
+tpv_z_ = 64
 scale_h = 1
 scale_w = 1
 scale_z = 1
@@ -159,7 +159,7 @@ self_layer = dict(
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
 model = dict(
-    type='OmniGaussian',
+    type='OmniGaussianOriginal',
     use_checkpoint=use_checkpoint,
     with_pixel=True,
     volume_only=volume_only,
@@ -215,10 +215,10 @@ model = dict(
         near=near,
         far=far),
     volume_gs=dict(
-        type="VolumeGaussian",
+        type="VolumeGaussianOriginal",
         use_checkpoint=use_checkpoint,
         encoder=dict(
-            type='TPVFormerEncoder',
+            type='TPVFormerEncoderOriginal',
             tpv_h=tpv_h_,
             tpv_w=tpv_w_,
             tpv_z=tpv_z_,
@@ -240,7 +240,7 @@ model = dict(
                 w=tpv_w_,
                 z=tpv_z_)),
         gs_decoder = dict(
-            type='VolumeGaussianDecoder',
+            type='VolumeGaussianDecoderOriginal',
             tpv_h=tpv_h_,
             tpv_w=tpv_w_,
             tpv_z=tpv_z_,

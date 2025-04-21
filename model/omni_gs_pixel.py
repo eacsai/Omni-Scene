@@ -37,7 +37,7 @@ def onlyDepth(depth, save_name):
     cv2.imwrite(save_name, c_depth)
 
 @MODELS.register_module()
-class OmniGaussian(BaseModule):
+class OmniGaussianPixel(BaseModule):
 
     def __init__(self,
                  backbone=None,

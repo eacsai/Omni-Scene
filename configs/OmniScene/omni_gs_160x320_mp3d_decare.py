@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_Spherical"
+exp_name = "omni_gs_160x320_mp3d_Spherical_decare"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
@@ -17,7 +17,7 @@ max_epochs = 10
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
-max_train_steps = 5000
+max_train_steps = 10000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
@@ -31,23 +31,20 @@ use_center, use_first, use_last = True, False, False
 resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
-task = 'spherical' # 'spherical' or 'square'
-if task == 'spherical':
-    point_cloud_range = [0.0, 0.0, 0.0, 64.0, 32.0, 8.0] #
-    scale_h = 1
-    scale_w = 1
-    scale_z = 1
-else:
-    point_cloud_range = [-10.0, -3.0, -10.0, 10.0, 3.0, 10.0]
-    scale_h = 0.25
-    scale_w = 0.5
-    scale_z = 2
+task = 'square' # 'spherical' or 'square'
+decare_cloud_range = [-10.0, -3.0, -10.0, 10.0, 3.0, 10.0]
+pc_depth = math.sqrt(decare_cloud_range[0]**2 + decare_cloud_range[1]**2 + decare_cloud_range[2]**2)
+point_cloud_range = [0.0, 0.0, 0.0, 64.0, 32.0, pc_depth]
+
+scale_h = 0.25
+scale_w = 0.5
+scale_z = 2
 
 dataset_params = dict(
     dataset_name="nuScenesDataset",
     seed=seed,
     resolution=resolution,
-    pc_range=point_cloud_range,
+    pc_range=decare_cloud_range,
     use_center=use_center,
     use_first=use_first,
     use_last=use_last,
@@ -104,8 +101,8 @@ gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
 # num_points = [16, 32, 32]
-num_points_in_pillar = [16, 16, 8]
-num_points = [32, 32, 16]
+num_points_in_pillar = [8, 32, 16]
+num_points = [16, 64, 32]
 hybrid_attn_anchors = 16
 hybrid_attn_points = 32
 hybrid_attn_init = 0
@@ -124,31 +121,31 @@ self_cross_layer = dict(
             num_points=hybrid_attn_points,
             init_mode=hybrid_attn_init,
             dropout=0.1),
-        # dict(
-        #     type='TPVImageCrossAttention',
-        #     pc_range=point_cloud_range,
-        #     num_cams=num_cams,
-        #     dropout=0.1,
-        #     deformable_attention=dict(
-        #         type='TPVMSDeformableAttention3D',
-        #         embed_dims=_dim_,
-        #         num_heads=num_heads,
-        #         num_points=num_points,
-        #         num_z_anchors=num_points_in_pillar,
-        #         num_levels=1,
-        #         floor_sampling_offset=False,
-        #         tpv_h=tpv_h_,
-        #         tpv_w=tpv_w_,
-        #         tpv_z=tpv_z_),
-        #     embed_dims=_dim_,
-        #     tpv_h=tpv_h_,
-        #     tpv_w=tpv_w_,
-        #     tpv_z=tpv_z_)
+        dict(
+            type='TPVImageCrossAttention',
+            pc_range=point_cloud_range,
+            num_cams=num_cams,
+            dropout=0.1,
+            deformable_attention=dict(
+                type='TPVMSDeformableAttention3D',
+                embed_dims=_dim_,
+                num_heads=num_heads,
+                num_points=num_points,
+                num_z_anchors=num_points_in_pillar,
+                num_levels=1,
+                floor_sampling_offset=False,
+                tpv_h=tpv_h_,
+                tpv_w=tpv_w_,
+                tpv_z=tpv_z_),
+            embed_dims=_dim_,
+            tpv_h=tpv_h_,
+            tpv_w=tpv_w_,
+            tpv_z=tpv_z_)
     ],
     feedforward_channels=_ffn_dim_,
     ffn_dropout=0.1,
-    # operation_order=('self_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm'),
-    operation_order=('self_attn', 'norm', 'ffn', 'norm'),
+    operation_order=('self_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm'),
+    # operation_order=('self_attn', 'norm', 'ffn', 'norm'),
     )
 
 self_layer = dict(
@@ -260,7 +257,7 @@ model = dict(
             tpv_h=tpv_h_,
             tpv_w=tpv_w_,
             tpv_z=tpv_z_,
-            pc_range=point_cloud_range,
+            pc_range=decare_cloud_range,
             gs_dim=14,
             in_dims=_dim_,
             hidden_dims=2*_dim_,

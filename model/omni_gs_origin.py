@@ -23,20 +23,73 @@ from pano2cube import Equirec2Cube, Cube2Equirec
 from vis_feat import single_features_to_RGB
 import torchvision.transforms as transforms
 to_pil_image = transforms.ToPILImage()
+
+
 import matplotlib.cm as cm
 import cv2
 
-def onlyDepth(depth, save_name):
-    cmap = cm.Spectral
-    depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
-    depth = depth.cpu().detach().numpy()
-    depth = depth.astype(np.uint8)
-    
-    c_depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-    cv2.imwrite(save_name, c_depth)
+import torch
+import numpy as np
+import cv2
+# import matplotlib.cm as cm # 不再需要 colormap
+
+def onlyDepth(depth, save_name, invert=False):
+    """
+    将深度图保存为灰度（黑白）图像。
+
+    Args:
+        depth (torch.Tensor): 输入的深度张量 (例如, shape [H, W])。
+        save_name (str): 保存图像的文件名。
+        invert (bool): 是否反转灰度图。默认为 False (近黑远白)。
+                       设置为 True 则 近白远黑。
+    """
+    # 1. 确保张量在 CPU 上并分离计算图
+    depth = depth.cpu().detach()
+
+    # 2. 处理无效值并归一化到 [0, 1]
+    #    找到有效的深度值（非 NaN, 非 Inf）用于计算 min/max
+    valid_depth = depth[torch.isfinite(depth)]
+
+    if valid_depth.numel() == 0:
+        # 如果没有有效深度值，创建一个全黑或全白的图像
+        print(f"Warning: No finite depth values found for {save_name}. Saving black image.")
+        h, w = depth.shape[:2] # 尝试获取原始尺寸
+        grayscale_depth_uint8 = np.zeros((h, w), dtype=np.uint8)
+    else:
+        depth_min = valid_depth.min()
+        depth_max = valid_depth.max()
+
+        # 避免除以零（如果所有有效深度都相同）
+        if depth_max == depth_min:
+             # 可以选择全黑、全白或中间灰度
+             print(f"Warning: Constant depth value found for {save_name}. Saving mid-gray image.")
+             # 使用原始张量的值（可能是 Inf 或 NaN），将它们映射到一个固定值
+             # 为了安全，我们创建一个固定值的数组
+             grayscale_depth_uint8 = np.full(depth.shape, 128, dtype=np.uint8) # 中间灰度
+        else:
+            # 将有效范围归一化到 [0, 1]
+            # 将原始张量中的值限制在有效范围内，并将 NaN/Inf 替换掉（例如替换为最大深度）
+            # 这样可以确保所有值都参与归一化计算
+            depth_clamped = torch.clamp(depth, depth_min, depth_max)
+            depth_clamped[~torch.isfinite(depth)] = depth_max # 将无效值设为最远
+
+            depth_normalized = (depth_clamped - depth_min) / (depth_max - depth_min)
+
+            # 3. (可选) 反转灰度值
+            if invert:
+                # 近白远黑
+                depth_normalized = 1.0 - depth_normalized
+
+            # 4. 缩放到 [0, 255] 并转换为 uint8
+            depth_scaled = depth_normalized * 255.0
+            grayscale_depth_uint8 = depth_scaled.numpy().astype(np.uint8)
+
+    # 5. 保存灰度图像
+    cv2.imwrite(save_name, grayscale_depth_uint8)
+    # print(f"Grayscale depth map saved to {save_name}") # 可以取消注释以确认保存
 
 @MODELS.register_module()
-class OmniGaussian(BaseModule):
+class OmniGaussianOriginal(BaseModule):
 
     def __init__(self,
                  backbone=None,
@@ -61,7 +114,6 @@ class OmniGaussian(BaseModule):
             self.neck = MODELS.build(neck)
         self.pixel_gs = MODELS.build(pixel_gs)
         self.volume_gs = MODELS.build(volume_gs)
-        self.task = task
         self.dataset_params = dataset_params
         self.camera_args = camera_args
         self.loss_args = loss_args
@@ -218,34 +270,19 @@ class OmniGaussian(BaseModule):
         gaussians_pixel_mask, gaussians_feat_mask, uv_map_mask, depth_pred_mask = [], [], [], []
 
         # decare
-        if self.task == 'square':
-            for b in range(bs):
-                mask_pixel_i = (gaussians_pixel[b, :, 0] > x_start) & (gaussians_pixel[b, :, 0] < x_end) & \
-                            (gaussians_pixel[b, :, 1] > y_start) & (gaussians_pixel[b, :, 1] < y_end) & \
-                            (gaussians_pixel[b, :, 2] > z_start) & (gaussians_pixel[b, :, 2] < z_end)
-                gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-                gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-                uv_map_i = uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i]
+        for b in range(bs):
+            mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
+                        (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
+                        (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
+            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
+            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
+            uv_map_i = uv_map[b][mask_pixel_i]
+            depth_pred_i = depth_pred[b][mask_pixel_i]
 
-                gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-                gaussians_feat_mask.append(gaussians_feat_mask_i)
-                uv_map_mask.append(uv_map_i)
-                depth_pred_mask.append(depth_pred_i)
-        else:
-            # Spherical
-            for b in range(bs):
-                mask_pixel_i = (depth_pred[b, :, 0] > z_start) & (depth_pred[b, :, 0] <= z_end)
-                # fix tab
-                gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-                gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-                uv_map_i = uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i]
-
-                gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-                gaussians_feat_mask.append(gaussians_feat_mask_i)
-                uv_map_mask.append(uv_map_i)
-                depth_pred_mask.append(depth_pred_i)
+            gaussians_pixel_mask.append(gaussians_pixel_mask_i)
+            gaussians_feat_mask.append(gaussians_feat_mask_i)
+            uv_map_mask.append(uv_map_i)
+            depth_pred_mask.append(depth_pred_i)
         
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         gaussians_volume = self.volume_gs(
@@ -321,29 +358,36 @@ class OmniGaussian(BaseModule):
         data_dict["conf_m_gt"] = conf_m_gt
         pc_range = self.dataset_params.pc_range
         x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        if self.task == 'square':
+        if self.loss_args.mask_dptm and self.loss_args.recon_loss_vol_type == "l2_mask_self":
+            depth_for_mask = render_pkg_pixel["depth"].squeeze(2).detach().unsqueeze(-1)
+            output_positions = data_dict["output_rays_o"] + data_dict["output_rays_d"] * depth_for_mask
+            mask_dptm = (output_positions[..., 0] >= x_start) & (output_positions[..., 0] <= x_end) & \
+                        (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
+                        (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
+            mask_dptm = mask_dptm & (depth_for_mask[..., 0] > 0.1)
+            mask_dptm = mask_dptm.float()
+        elif self.loss_args.mask_dptm and self.loss_args.recon_loss_vol_type == "l2_mask":
             output_positions = data_dict["output_positions"]
-            mask_dptm = (output_positions[..., 0] > x_start) & (output_positions[..., 0] < x_end) & \
-                        (output_positions[..., 1] > y_start) & (output_positions[..., 1] < y_end) & \
-                        (output_positions[..., 2] > z_start) & (output_positions[..., 2] < z_end)
-        else:
-            mask_dptm = (data_dict["output_depths_m"].squeeze(2) > z_start) & (data_dict["output_depths_m"].squeeze(2) <= z_end)
-        
-        mask_dptm = mask_dptm.float()
+            mask_dptm = (output_positions[..., 0] >= x_start) & (output_positions[..., 0] <= x_end) & \
+                        (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
+                        (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
+            mask_dptm = mask_dptm.float()
+            
         # mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm
 
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d_double.png')
+        test_img.save('render_pixel_mp3d.png')
         test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_fuse_mp3d_double.png')
+        test_img.save('render_fuse_mp3d.png')
         test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_double.png')
+        test_img.save('render_volume_mp3d.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_double.png')
+        test_img.save('render_gt_mp3d.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_double.png')
+        test_img.save('render_bev_mp3d.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
+
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
             # RGB loss for omni-gs
@@ -353,7 +397,7 @@ class OmniGaussian(BaseModule):
                 rec_loss = (rgb_gt - render_pkg_fuse["image"]) ** 2
             loss = loss + (rec_loss.mean() * self.loss_args.weight_recon)
             set_loss("recon", split, rec_loss.mean(), self.loss_args.weight_recon)
-        if self.loss_args.weight_recon_vol > 0 and iter < iter_end - 1000:
+        if self.loss_args.weight_recon_vol > 0:
             # RGB loss for volume-gs
             if self.loss_args.recon_loss_vol_type == "l1":
                 rec_loss_vol = torch.abs(rgb_gt - render_pkg_volume["image"])
@@ -381,7 +425,7 @@ class OmniGaussian(BaseModule):
             p_loss = p_loss.mean()
             loss = loss + (p_loss * self.loss_args.weight_perceptual)
             set_loss("perceptual", split, p_loss, self.loss_args.weight_perceptual)
-        if self.loss_args.weight_perceptual_vol > 0 and iter < iter_end - 1000:
+        if self.loss_args.weight_perceptual_vol > 0:
             # Perceptual loss for volume-gs
             p_inp_pred_vol = maybe_resize(
                 render_pkg_volume["image"].reshape(-1, 3, self.camera_args.resolution[0], self.camera_args.resolution[1]),
@@ -412,9 +456,13 @@ class OmniGaussian(BaseModule):
             loss = loss + self.loss_args.weight_depth_abs * depth_abs_loss
             set_loss("depth_abs", split, depth_abs_loss, self.loss_args.weight_depth_abs)
         ## Depth loss for volume-gs
-        if self.loss_args.weight_depth_abs_vol > 0  and iter < iter_end - 1000:
-            depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt * mask_dptm.unsqueeze(2))
-            depth_abs_loss_vol = depth_abs_loss_vol * conf_m_gt
+        if self.loss_args.weight_depth_abs_vol > 0:
+            if self.loss_args.depth_abs_loss_vol_type == "mask":
+                depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt * mask_dptm.unsqueeze(2))
+                depth_abs_loss_vol = depth_abs_loss_vol * conf_m_gt
+            elif self.loss_args.depth_abs_loss_vol_type == "mask_self":
+                depth_m_gt_pseudo = render_pkg_pixel["depth"].detach()
+                depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt_pseudo * mask_dptm.unsqueeze(2))
             depth_abs_loss_vol = depth_abs_loss_vol.mean()
             loss = loss + self.loss_args.weight_depth_abs_vol * depth_abs_loss_vol
             set_loss("depth_abs_vol", split, depth_abs_loss_vol, self.loss_args.weight_depth_abs_vol)
@@ -439,56 +487,38 @@ class OmniGaussian(BaseModule):
         # pixel-gs prediction
         with self.benchmarker.time("pixel_gs"):
             gaussians_pixel, gaussians_feat, depth_pred, uv_map = self.pixel_gs(
-                rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
-                data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"], status='test')
+                    rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
+                    data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
+                    data_dict["rays_o"], data_dict["rays_d"], status='test')
 
         # volume-gs prediction
         pc_range = self.dataset_params.pc_range
         x_start, y_start, z_start, x_end, y_end, z_end = pc_range
         gaussians_pixel_mask, gaussians_feat_mask, uv_map_mask, depth_pred_mask = [], [], [], []
+        for b in range(bs):
+            mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
+                        (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
+                        (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
+            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
+            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
+            uv_map_i = uv_map[b][mask_pixel_i]
+            depth_pred_i = depth_pred[b][mask_pixel_i]
 
-        # decare
-        if self.task == 'square':
-            for b in range(bs):
-                mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
-                            (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
-                            (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
-                gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-                gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-                uv_map_i = uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i]
+            gaussians_pixel_mask.append(gaussians_pixel_mask_i)
+            gaussians_feat_mask.append(gaussians_feat_mask_i)
+            uv_map_mask.append(uv_map_i)
+            depth_pred_mask.append(depth_pred_i)
 
-                gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-                gaussians_feat_mask.append(gaussians_feat_mask_i)
-                uv_map_mask.append(uv_map_i)
-                depth_pred_mask.append(depth_pred_i)
-        else:
-            # Spherical
-            for b in range(bs):
-                mask_pixel_i = (depth_pred[b, :, 0] > z_start) & (depth_pred[b, :, 0] <= z_end)
-
-                gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-                gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-                uv_map_i = uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i]
-
-                gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-                gaussians_feat_mask.append(gaussians_feat_mask_i)
-                uv_map_mask.append(uv_map_i)
-                depth_pred_mask.append(depth_pred_i)
-        
         with self.benchmarker.time("volume_gs"):
             gaussians_volume = self.volume_gs(
-                [img_feats[0]],
-                gaussians_pixel_mask,
-                gaussians_feat_mask,
-                uv_map_mask,
-                depth_pred_mask,
-                data_dict["img_metas"], status="test")
+                    [img_feats[0]],
+                    gaussians_pixel_mask,
+                    gaussians_feat_mask,
+                    uv_map_mask,
+                    depth_pred_mask,
+                    data_dict["img_metas"], status='test')
         
         gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
-        # gaussians_all = gaussians_volume
         bs = gaussians_all.shape[0]
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]
