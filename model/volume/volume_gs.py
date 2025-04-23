@@ -50,7 +50,7 @@ class VolumeGaussian(BaseModule):
             project_feats_wz = candidate_feats[0].new_zeros((bs, self.tpv_w, self.tpv_z, c))
 
             for i in range(bs):
-                # candidate_xyzs_i = candidate_gaussians[i][..., :3]
+                candidate_xyzs_i = candidate_gaussians[i][..., :3]
                 
                 # Decare
                 # candidate_hs_i = (self.tpv_h * (candidate_xyzs_i[..., 1] - self.pc_range[1]) / self.pc_yrange - 0.5).int()
@@ -58,7 +58,12 @@ class VolumeGaussian(BaseModule):
                 # candidate_zs_i = (self.tpv_z * (candidate_xyzs_i[..., 2] - self.pc_range[2]) / self.pc_zrange - 0.5).int()
                 
                 # Spherical
-                eps = 1e-8
+                # eps = 1e-8
+                # candidate_hs_i = (self.tpv_h * (torch.atan2(candidate_xyzs_i[..., 1], torch.sqrt(candidate_xyzs_i[..., 0]**2 + candidate_xyzs_i[..., 2]**2 + eps)) + torch.pi/2)/torch.pi - 0.5).int()
+                # candidate_ws_i = (self.tpv_w * (torch.atan2(candidate_xyzs_i[..., 0], candidate_xyzs_i[..., 2]) + torch.pi)/(2 * torch.pi) - 0.5).int()
+                # candidate_zs_i = (self.tpv_z * torch.sqrt(candidate_xyzs_i[..., 0]**2 + candidate_xyzs_i[..., 1]**2 + candidate_xyzs_i[..., 2]**2) / self.pc_zrange - 0.5).int()
+                
+                # original
                 candidate_hs_i = candidate_uv_map[i][:, 1]
                 candidate_ws_i = candidate_uv_map[i][:, 0]
                 candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - 0.5).int()
@@ -124,4 +129,12 @@ class VolumeGaussian(BaseModule):
         bs = gaussians.shape[0]
         n_feature = gaussians.shape[-1]
         gaussians = gaussians.reshape(bs, -1, n_feature)
+
+        # K = 5000                 # 要保留的 top K 个高斯球
+        # feature_index = 6         # 第 7 个特征的索引 (0-based)
+        # ranking_feature = gaussians[:, :, feature_index]
+        # _, top_indices = torch.topk(ranking_feature, k=K, dim=1) # dim=1 是高斯球数量的维度
+        # indices_for_gather = top_indices.unsqueeze(-1).expand(-1, -1, 14) # Shape: [6, 10000, 14]
+        # filtered_gaussians = torch.gather(gaussians, dim=1, index=indices_for_gather) # Shape: [6, 10000, 14]
+
         return gaussians

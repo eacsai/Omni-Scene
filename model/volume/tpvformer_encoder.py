@@ -322,6 +322,37 @@ class TPVFormerEncoder(TransformerLayerSequence):
         # init reference_points
         reference_points = reference_points.clone().permute(0,2,1,3).repeat(B, 1, 1, 1).unsqueeze(0)
         reference_points_cam = reference_points[..., :2]
+        
+        # eps = 1e-5
+        # spherical_reference_points = reference_points.clone()
+        # reference_points[..., 0:1] = -spherical_reference_points[..., 2:3] * torch.sin(spherical_reference_points[..., 1:2]*torch.pi) * torch.sin(spherical_reference_points[..., 0:1]*2*torch.pi)
+        # reference_points[..., 1:2] = -spherical_reference_points[..., 2:3] * torch.cos(spherical_reference_points[..., 1:2]*torch.pi)
+        # reference_points[..., 2:3] = -spherical_reference_points[..., 2:3] * torch.sin(spherical_reference_points[..., 1:2]*torch.pi) * torch.cos(spherical_reference_points[..., 0:1]*2*torch.pi)
+        # B_ref, D, num_query, _ = reference_points.shape
+        
+        # # init lidar2img
+        # lidar2img = []
+        # for img_meta in img_metas:
+        #     lidar2img.append(img_meta["lidar2img"])
+        # lidar2img = torch.stack(lidar2img)
+        # lidar2img = lidar2img[:,:,None,None,:,:].repeat(1,1,D,num_query,1,1)
+        # num_cams = lidar2img.shape[1]
+
+        # # get reference_points
+        # reference_points = reference_points.unsqueeze(0).repeat(B // B_ref, num_cams, 1, 1, 1)
+        # ones = torch.ones_like(reference_points[..., :1], device=reference_points.device, dtype=reference_points.dtype)
+        # reference_points_homogeneous = torch.cat((reference_points, ones), dim=-1)
+        # P_cam_homogeneous = torch.matmul(lidar2img, reference_points_homogeneous.unsqueeze(-1))
+        # P_cam_homogeneous = P_cam_homogeneous.squeeze(-1)
+        # w_prime = P_cam_homogeneous[..., 3:]
+        # reference_points = P_cam_homogeneous[..., :3] / (w_prime + eps)
+
+        # x = reference_points[...,0:1]
+        # y = reference_points[...,1:2]
+        # z = reference_points[...,2:3]
+        # theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
+        # phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
+        # reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4)
 
         tpv_mask = (
             (reference_points_cam[..., 1:2] > 0.0)

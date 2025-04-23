@@ -32,18 +32,24 @@ class PixelGaussian(BaseModule):
                  near=0.1,
                  far=1000.0,
                  use_checkpoint=False,
-                 tpv_h=32,
-                 tpv_w=64,
-                 tpv_z=64,
+                 near_tpv_h=32,
+                 near_tpv_w=64,
+                 near_tpv_z=64,
+                 far_tpv_h=32,
+                 far_tpv_w=64,
+                 far_tpv_z=64,
                  **kwargs,
                  ):
 
         super().__init__()
 
         self.use_checkpoint = use_checkpoint
-        self.tpv_h = tpv_h
-        self.tpv_w = tpv_w
-        self.tpv_z = tpv_z
+        self.near_tpv_h = near_tpv_h
+        self.near_tpv_w = near_tpv_w
+        self.near_tpv_z = near_tpv_z
+        self.far_tpv_h = far_tpv_h
+        self.far_tpv_w = far_tpv_w
+        self.far_tpv_z = far_tpv_z        
         self.plucker_to_embed = nn.Linear(6, out_embed_dims[0])
         self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, out_embed_dims[0]))
         
@@ -216,12 +222,22 @@ class PixelGaussian(BaseModule):
         features = features.unsqueeze(2) # b v*h*w n c
         features = rearrange(features, "b r n c -> b (r n) c")
 
-        u = torch.linspace(0.5, self.tpv_w-0.5, w).to(self.device)  # horizontal coordinate (left=-1, right=+1)
-        v = torch.linspace(0.5, self.tpv_h-0.5, h).to(self.device)  # vertical coordinate (top=-1, bottom=1)
+        u = torch.linspace(0.5, self.near_tpv_w-0.5, w).to(self.device)  # horizontal coordinate (left=0, right=+1)
+        v = torch.linspace(0.5, self.near_tpv_h-0.5, h).to(self.device)  # vertical coordinate (top=0, bottom=1)
         # Note: v is reversed so that +1 corresponds to top (north pole) and -1 to bottom (south).
         # Meshgrid to get coordinate matrix for face
         v_map, u_map = torch.meshgrid(v, u, indexing='ij')  # shape (face_w, face_w)
         # u_map = u_map.int().view(-1)
         # v_map = v_map.int().view(-1)
-        uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2).unsqueeze(0).repeat(bs,1,1)
-        return gaussians, features, depth_pred, uv_map
+        near_uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2).unsqueeze(0).repeat(bs,1,1)
+        
+        u = torch.linspace(0.5, self.far_tpv_w-0.5, w).to(self.device)  # horizontal coordinate (left=0, right=+1)
+        v = torch.linspace(0.5, self.far_tpv_h-0.5, h).to(self.device)  # vertical coordinate (top=0, bottom=1)
+        # Note: v is reversed so that +1 corresponds to top (north pole) and -1 to bottom (south).
+        # Meshgrid to get coordinate matrix for face
+        v_map, u_map = torch.meshgrid(v, u, indexing='ij')  # shape (face_w, face_w)
+        # u_map = u_map.int().view(-1)
+        # v_map = v_map.int().view(-1)
+        far_uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2).unsqueeze(0).repeat(bs,1,1)
+        
+        return gaussians, features, depth_pred, near_uv_map, far_uv_map

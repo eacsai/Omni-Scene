@@ -54,3 +54,8 @@ python evaluate_mp3d.py \
     --py-config "configs/OmniScene/omni_gs_160x320_mp3d.py" \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d" \
     --load-from "checkpoint-3000"
+
+python evaluate_mp3d.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross" \
+    --load-from "checkpoint-3000"

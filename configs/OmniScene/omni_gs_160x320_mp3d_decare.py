@@ -17,7 +17,7 @@ max_epochs = 10
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
-max_train_steps = 10000
+max_train_steps = 5000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
@@ -35,10 +35,6 @@ task = 'square' # 'spherical' or 'square'
 decare_cloud_range = [-10.0, -3.0, -10.0, 10.0, 3.0, 10.0]
 pc_depth = math.sqrt(decare_cloud_range[0]**2 + decare_cloud_range[1]**2 + decare_cloud_range[2]**2)
 point_cloud_range = [0.0, 0.0, 0.0, 64.0, 32.0, pc_depth]
-
-scale_h = 0.25
-scale_w = 0.5
-scale_z = 2
 
 dataset_params = dict(
     dataset_name="nuScenesDataset",
@@ -85,7 +81,7 @@ loss_args = dict(
     weight_depth_abs_vol=0.01,
 )
 
-pc_range = point_cloud_range
+pc_range = decare_cloud_range
 pc_xrange, pc_yrange, pc_zrange = pc_range[3] - pc_range[0], pc_range[4] - pc_range[1], pc_range[5] - pc_range[2]
 
 _dim_ = 128
@@ -97,12 +93,17 @@ _ffn_dim_ = _dim_ * 2
 tpv_h_ = 64   # phi
 tpv_w_ = 128  # theta
 tpv_z_ = 32  # r
+
+scale_h = 0.25  # 16
+scale_w = 0.5  # 64
+scale_z = 2 # 64
+
 gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
 # num_points = [16, 32, 32]
-num_points_in_pillar = [8, 32, 16]
-num_points = [16, 64, 32]
+num_points_in_pillar = [1, 20, 40]
+num_points = [2, 40, 80]
 hybrid_attn_anchors = 16
 hybrid_attn_points = 32
 hybrid_attn_init = 0
@@ -266,8 +267,8 @@ model = dict(
             scale_w=scale_w,
             scale_z=scale_z,
             gpv=gpv,
-            offset_max=[2 * math.pi / (tpv_w_*scale_w), math.pi / (tpv_h_*scale_h), pc_zrange / (tpv_z_*scale_z)],
-            scale_max=[2 * math.pi / (tpv_w_*scale_w), math.pi / (tpv_h_*scale_h), pc_zrange / (tpv_z_*scale_z)],
+            offset_max=[2 * pc_xrange / (tpv_w_*scale_w), 2 * pc_yrange / (tpv_h_*scale_h), 2 * pc_zrange / (tpv_z_*scale_z)],
+            scale_max=[2 * pc_xrange / (tpv_w_*scale_w), 2 * pc_yrange / (tpv_h_*scale_h), 2 * pc_zrange / (tpv_z_*scale_z)],
             task=task
         )
     ),
