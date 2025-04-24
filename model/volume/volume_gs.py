@@ -39,7 +39,7 @@ class VolumeGaussian(BaseModule):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, img_feats, candidate_gaussians, candidate_feats, candidate_uv_map, candidate_depth_pred,img_metas=None, status="train"):
+    def forward(self, img_feats, candidate_gaussians, candidate_feats, candidate_uv_map, candidate_depth_pred, img_metas=None, status="train"):
         """Forward training function.
         """
         if candidate_gaussians is not None and candidate_feats is not None:
@@ -58,15 +58,18 @@ class VolumeGaussian(BaseModule):
                 # candidate_zs_i = (self.tpv_z * (candidate_xyzs_i[..., 2] - self.pc_range[2]) / self.pc_zrange - 0.5).int()
                 
                 # Spherical
-                # eps = 1e-8
-                # candidate_hs_i = (self.tpv_h * (torch.atan2(candidate_xyzs_i[..., 1], torch.sqrt(candidate_xyzs_i[..., 0]**2 + candidate_xyzs_i[..., 2]**2 + eps)) + torch.pi/2)/torch.pi - 0.5).int()
-                # candidate_ws_i = (self.tpv_w * (torch.atan2(candidate_xyzs_i[..., 0], candidate_xyzs_i[..., 2]) + torch.pi)/(2 * torch.pi) - 0.5).int()
-                # candidate_zs_i = (self.tpv_z * torch.sqrt(candidate_xyzs_i[..., 0]**2 + candidate_xyzs_i[..., 1]**2 + candidate_xyzs_i[..., 2]**2) / self.pc_zrange - 0.5).int()
+                eps = 1e-5
+                x = candidate_xyzs_i[..., 0]
+                y = candidate_xyzs_i[..., 1]
+                z = candidate_xyzs_i[..., 2]
+                candidate_hs_i = (self.tpv_h * (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps))  + torch.pi/2) / torch.pi - eps).int()
+                candidate_ws_i = (self.tpv_w * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) - eps).int()
+                candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - eps).int()
                 
                 # original
-                candidate_hs_i = candidate_uv_map[i][:, 1]
-                candidate_ws_i = candidate_uv_map[i][:, 0]
-                candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - 0.5).int()
+                # candidate_hs_i = candidate_uv_map[i][:, 1]
+                # candidate_ws_i = candidate_uv_map[i][:, 0]
+                # candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - 0.5).int()
                 # n, c
                 #candidate_feats_i = candidate_feats[[i, valid_mask]]
                 candidate_feats_i = candidate_feats[i]

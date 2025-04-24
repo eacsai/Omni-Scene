@@ -259,7 +259,7 @@ class OmniGaussianOriginal(BaseModule):
         img_feats = self.extract_img_feat(img=img)
 
         # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred, uv_map = self.pixel_gs(
+        gaussians_pixel, gaussians_feat, depth_pred, near_uv_map, far_uv_map = self.pixel_gs(
                 rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"])
@@ -276,7 +276,7 @@ class OmniGaussianOriginal(BaseModule):
                         (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
             gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
             gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-            uv_map_i = uv_map[b][mask_pixel_i]
+            uv_map_i = far_uv_map[b][mask_pixel_i]
             depth_pred_i = depth_pred[b][mask_pixel_i]
 
             gaussians_pixel_mask.append(gaussians_pixel_mask_i)
@@ -376,16 +376,16 @@ class OmniGaussianOriginal(BaseModule):
         # mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm
 
-        test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d.png')
-        test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_fuse_mp3d.png')
-        test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d.png')
-        test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d.png')
-        test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d.png')
+        # test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_pixel_mp3d.png')
+        # test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_fuse_mp3d.png')
+        # test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_volume_mp3d.png')
+        # test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
+        # test_img.save('render_gt_mp3d.png')
+        # test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
+        # test_img.save('render_bev_mp3d.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
 
         # ======================== RGB loss ======================== #
@@ -486,7 +486,7 @@ class OmniGaussianOriginal(BaseModule):
 
         # pixel-gs prediction
         with self.benchmarker.time("pixel_gs"):
-            gaussians_pixel, gaussians_feat, depth_pred, uv_map = self.pixel_gs(
+            gaussians_pixel, gaussians_feat, depth_pred, near_uv_map, far_uv_map = self.pixel_gs(
                     rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                     data_dict["rays_o"], data_dict["rays_d"], status='test')
@@ -501,7 +501,7 @@ class OmniGaussianOriginal(BaseModule):
                         (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
             gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
             gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-            uv_map_i = uv_map[b][mask_pixel_i]
+            uv_map_i = far_uv_map[b][mask_pixel_i]
             depth_pred_i = depth_pred[b][mask_pixel_i]
 
             gaussians_pixel_mask.append(gaussians_pixel_mask_i)

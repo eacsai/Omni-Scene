@@ -1,6 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -19,8 +19,8 @@ from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
 
-from data.mp3d_dataloader import load_MP3D_data
-# from data.mp3d_dataloader_double import load_MP3D_data
+# from data.mp3d_dataloader import load_MP3D_data
+from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
 import warnings
@@ -265,7 +265,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume-from', type=str, default='')
 
     args = parser.parse_args()
-
+    
     SEED = 42 # 你可以选择任何固定的整数
     torch.manual_seed(SEED)
 

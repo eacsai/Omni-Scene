@@ -63,7 +63,7 @@ class DatasetMP3D(Dataset):
         for root, test_dataset in zip(self.roots, test_datasets):
             if not os.path.exists(root):
                 continue
-            scenes = os.listdir(root)
+            scenes =  [f for f in os.listdir(root) if "DS_Store" not in f]
             scenes.sort()
             for s in scenes:
                 data.append({
@@ -80,7 +80,7 @@ class DatasetMP3D(Dataset):
         data = self.data[idx].copy()
         scene = data['scene_id']
         scene_path = data['root'] / scene
-        views = os.listdir(scene_path)
+        views = [f for f in os.listdir(scene_path) if "DS_Store" not in f]
         views.sort()
 
         # Load the images.

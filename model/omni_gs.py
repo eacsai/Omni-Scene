@@ -226,6 +226,7 @@ class OmniGaussian(BaseModule):
         far_gaussians_pixel_mask, far_gaussians_feat_mask, far_depth_pred_mask = [], [], []
         near_uv_map_mask, far_uv_map_mask = [], []
 
+        depth_xyz = torch.sqrt(gaussians_pixel[..., 0:1]**2 + gaussians_pixel[..., 1:2]**2 + gaussians_pixel[..., 2:3]**2 + 1e-5)
         # decare
         if self.task == 'square':
             for b in range(bs):
@@ -244,12 +245,12 @@ class OmniGaussian(BaseModule):
         else:
             # Spherical
             for b in range(bs):
-                mask_pixel_i = (depth_pred[b, :, 0] > self.near_point_cloud_range[2]) & (depth_pred[b, :, 0] <= self.near_point_cloud_range[5])
+                mask_pixel_i = (depth_xyz[b, :, 0] > self.near_point_cloud_range[2]) & (depth_xyz[b, :, 0] <= self.near_point_cloud_range[5])
                 # fix tab
                 gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
                 gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
                 near_uv_map_i = near_uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i] - self.near_point_cloud_range[2]
+                depth_pred_i = depth_xyz[b][mask_pixel_i] - self.near_point_cloud_range[2]
 
                 near_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
                 near_gaussians_feat_mask.append(gaussians_feat_mask_i)
@@ -257,12 +258,12 @@ class OmniGaussian(BaseModule):
                 near_depth_pred_mask.append(depth_pred_i)
             
             for b in range(bs):
-                mask_pixel_i = (depth_pred[b, :, 0] > self.far_point_cloud_range[2]) & (depth_pred[b, :, 0] <= self.far_point_cloud_range[5])
+                mask_pixel_i = (depth_xyz[b, :, 0] > self.far_point_cloud_range[2]) & (depth_xyz[b, :, 0] <= self.far_point_cloud_range[5])
                 # fix tab
                 gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
                 gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
                 far_uv_map_i = far_uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i] - self.far_point_cloud_range[2]
+                depth_pred_i = depth_xyz[b][mask_pixel_i] - self.far_point_cloud_range[2]
 
                 far_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
                 far_gaussians_feat_mask.append(gaussians_feat_mask_i)
@@ -365,15 +366,15 @@ class OmniGaussian(BaseModule):
         data_dict["mask_dptm"] = mask_dptm
 
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d_double.png')
+        test_img.save('render_pixel_mp3d.png')
         test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_fuse_mp3d_double.png')
+        test_img.save('render_fuse_mp3d.png')
         test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_double.png')
+        test_img.save('render_volume_mp3d.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_double.png')
+        test_img.save('render_gt_mp3d.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_double.png')
+        test_img.save('render_bev_mp3d.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
@@ -480,6 +481,7 @@ class OmniGaussian(BaseModule):
         far_gaussians_pixel_mask, far_gaussians_feat_mask, far_depth_pred_mask = [], [], []
         near_uv_map_mask, far_uv_map_mask = [], []
 
+        depth_xyz = torch.sqrt(gaussians_pixel[..., 0:1]**2 + gaussians_pixel[..., 1:2]**2 + gaussians_pixel[..., 2:3]**2 + 1e-5)
         # decare
         if self.task == 'square':
             for b in range(bs):
@@ -498,12 +500,12 @@ class OmniGaussian(BaseModule):
         else:
             # Spherical
             for b in range(bs):
-                mask_pixel_i = (depth_pred[b, :, 0] > self.near_point_cloud_range[2]) & (depth_pred[b, :, 0] <= self.near_point_cloud_range[5])
+                mask_pixel_i = (depth_xyz[b, :, 0] > self.near_point_cloud_range[2]) & (depth_xyz[b, :, 0] <= self.near_point_cloud_range[5])
                 # fix tab
                 gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
                 gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
                 near_uv_map_i = near_uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i] - self.near_point_cloud_range[2]
+                depth_pred_i = depth_xyz[b][mask_pixel_i] - self.near_point_cloud_range[2]
 
                 near_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
                 near_gaussians_feat_mask.append(gaussians_feat_mask_i)
@@ -511,12 +513,12 @@ class OmniGaussian(BaseModule):
                 near_depth_pred_mask.append(depth_pred_i)
             
             for b in range(bs):
-                mask_pixel_i = (depth_pred[b, :, 0] > self.far_point_cloud_range[2]) & (depth_pred[b, :, 0] <= self.far_point_cloud_range[5])
+                mask_pixel_i = (depth_xyz[b, :, 0] > self.far_point_cloud_range[2]) & (depth_xyz[b, :, 0] <= self.far_point_cloud_range[5])
                 # fix tab
                 gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
                 gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
                 far_uv_map_i = far_uv_map[b][mask_pixel_i]
-                depth_pred_i = depth_pred[b][mask_pixel_i] - self.far_point_cloud_range[2]
+                depth_pred_i = depth_xyz[b][mask_pixel_i] - self.far_point_cloud_range[2]
 
                 far_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
                 far_gaussians_feat_mask.append(gaussians_feat_mask_i)

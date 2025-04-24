@@ -222,22 +222,22 @@ class PixelGaussian(BaseModule):
         features = features.unsqueeze(2) # b v*h*w n c
         features = rearrange(features, "b r n c -> b (r n) c")
 
-        u = torch.linspace(0.5, self.near_tpv_w-0.5, w).to(self.device)  # horizontal coordinate (left=0, right=+1)
-        v = torch.linspace(0.5, self.near_tpv_h-0.5, h).to(self.device)  # vertical coordinate (top=0, bottom=1)
+        u = torch.linspace(0, self.near_tpv_w, w+1)[:-1].to(self.device)  # horizontal coordinate (left=0, right=+1)
+        v = torch.linspace(0, self.near_tpv_h, h+1)[:-1].to(self.device)  # vertical coordinate (top=0, bottom=1)
         # Note: v is reversed so that +1 corresponds to top (north pole) and -1 to bottom (south).
         # Meshgrid to get coordinate matrix for face
         v_map, u_map = torch.meshgrid(v, u, indexing='ij')  # shape (face_w, face_w)
         # u_map = u_map.int().view(-1)
         # v_map = v_map.int().view(-1)
-        near_uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2).unsqueeze(0).repeat(bs,1,1)
+        near_uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2)[None,None,:,:].repeat(bs,self.num_cams,1,1).view(bs,-1,2)
         
-        u = torch.linspace(0.5, self.far_tpv_w-0.5, w).to(self.device)  # horizontal coordinate (left=0, right=+1)
-        v = torch.linspace(0.5, self.far_tpv_h-0.5, h).to(self.device)  # vertical coordinate (top=0, bottom=1)
+        u = torch.linspace(0, self.far_tpv_w, w+1)[:-1].to(self.device)  # horizontal coordinate (left=0, right=+1)
+        v = torch.linspace(0, self.far_tpv_h, h+1)[:-1].to(self.device)  # vertical coordinate (top=0, bottom=1)
         # Note: v is reversed so that +1 corresponds to top (north pole) and -1 to bottom (south).
         # Meshgrid to get coordinate matrix for face
         v_map, u_map = torch.meshgrid(v, u, indexing='ij')  # shape (face_w, face_w)
         # u_map = u_map.int().view(-1)
         # v_map = v_map.int().view(-1)
-        far_uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2).unsqueeze(0).repeat(bs,1,1)
+        far_uv_map = torch.stack([u_map,v_map], dim=-1).int().view(-1,2)[None,None,:,:].repeat(bs,self.num_cams,1,1).view(bs,-1,2)
         
         return gaussians, features, depth_pred, near_uv_map, far_uv_map
