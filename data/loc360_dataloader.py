@@ -89,7 +89,7 @@ def two_sample(scene, extrinsics, stage="train", i=0):
 
 def one_sample(scene, extrinsics, stage="train", i=0):
     num_views, _, _ = extrinsics.shape
-    context_gap = 2
+    context_gap = 4
 
     # Pick the left and right context indices.
 
@@ -101,7 +101,7 @@ def one_sample(scene, extrinsics, stage="train", i=0):
 
     return (
         torch.tensor([index_context_left]),
-        torch.tensor((index_context_left - 1, index_context_left, index_context_left + 1)),
+        torch.tensor((index_context_left - 2, index_context_left, index_context_left + 2)),
     )
 
 class Dataset360Loc(IterableDataset):

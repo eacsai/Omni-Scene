@@ -5,12 +5,14 @@ from mmengine.registry import MODELS
 from sample_anchors import sample_concentrating_sphere, project_onto_planes
 import math
 from vis_feat import single_features_to_RGB
+from simple_knn._C import distCUDA2
+
 def sigmoid_scaling(scaling:torch.Tensor, lower_bound=0.005, upper_bound=0.02):
     sig = torch.sigmoid(scaling)
     return lower_bound * (1 - sig) + upper_bound * sig
 
 @MODELS.register_module()
-class VolumeGaussianDecoder(BaseModule):
+class VolumeGaussianDecoderConf(BaseModule):
     def __init__(
         self, tpv_h, tpv_w, tpv_z, pc_range, gs_dim=14,
         in_dims=64, hidden_dims=128, out_dims=None,
@@ -35,7 +37,7 @@ class VolumeGaussianDecoder(BaseModule):
             nn.Linear(hidden_dims, out_dims)
         )
 
-        self.gs_decoder = nn.Linear(out_dims, gs_dim*gpv)
+        self.gs_decoder = nn.Linear(out_dims, (gs_dim+1)*gpv)
         self.use_checkpoint = use_checkpoint
 
         # set activations
@@ -45,17 +47,19 @@ class VolumeGaussianDecoder(BaseModule):
         #     self.offset_max = [1.0] * 3 # meters
         # else:
         #     self.offset_max = offset_max
-        self.offset_max = [1.0] * 3
+        self.offset_max = [0.5] * 3
         #self.scale_act = lambda x: sigmoid_scaling(x, lower_bound=0.005, upper_bound=0.02)
         # if scale_max is None:
         #     self.scale_max = [1.0] * 3 # meters
         # else:
         #     self.scale_max = scale_max
-        self.scale_max = [1.0] * 3 
+        self.scale_max = [0.5] * 3
+
         self.scale_act = lambda x: torch.sigmoid(x)
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = lambda x: torch.sigmoid(x)
+        self.conf_act = lambda x: torch.sigmoid(x)
 
         if task == 'spherical':
             # obtain anchor points for gaussians        
@@ -66,11 +70,20 @@ class VolumeGaussianDecoder(BaseModule):
             # mask_lower = gs_anchors[:, 0, 1] >= -2.5
             # mask_upper = gs_anchors[:, 0, 1] <= 2.5
             # combined_mask = torch.logical_and(mask_lower, mask_upper)
+            # anchors_dist = torch.clamp_min(distCUDA2(gs_anchors.view(-1,3)).float().cuda(), 0.0000001)
+            # self.offset_max = [anchors_dist.max()] * 3
+            # self.scale_max = [anchors_dist.max()] * 3
+
             self.register_buffer('gs_anchors', gs_anchors)
             # self.register_buffer('anchors_coordinates', anchors_coordinates[combined_mask])
         else:
             gs_anchors = self.get_reference_points(int(tpv_h * scale_h), int(tpv_w * scale_w), int(tpv_z * scale_z), pc_range) # 1, w, h, z, 3
             anchors_coordinates = self.get_square_coordinates(gs_anchors, self.pc_depth)
+            
+            anchors_dist = torch.clamp_min(distCUDA2(gs_anchors.view(-1,3)).float().cuda(), 0.0000001)
+            # self.offset_max = [anchors_dist.max()] * 3
+            # self.scale_max = [anchors_dist.max()] * 3
+
             self.register_buffer('gs_anchors', gs_anchors)
             self.register_buffer('anchors_coordinates', anchors_coordinates)
 
@@ -196,9 +209,9 @@ class VolumeGaussianDecoder(BaseModule):
         #     anchors_feat = F.grid_sample(tpv_feat, anchors_plane_coordinates[:,l:l+1,:,:], mode='bilinear', padding_mode='zeros', align_corners=False)
         #     anchors_feats.append(anchors_feat.squeeze(2))
         # anchors_feats = anchors_feats[0] + anchors_feats[1] + anchors_feats[2] #[bs, M, c]
-        # single_features_to_RGB(anchors_feats[0], img_name='feat_hw.png')
-        # single_features_to_RGB(anchors_feats[1], img_name='feat_zh.png')
-        # single_features_to_RGB(anchors_feats[2], img_name='feat_wz.png')
+        # single_features_to_RGB(tpv_hw, img_name='feat_hw.png')
+        # single_features_to_RGB(tpv_zh, img_name='feat_zh.png')
+        # single_features_to_RGB(tpv_wz, img_name='feat_wz.png')
         # _, _, num_points = anchors_feats.shape
 
         # gaussians = anchors_feats.permute(0,2,1)
@@ -255,7 +268,6 @@ class VolumeGaussianDecoder(BaseModule):
         scale_x = self.scale_act(x[..., 11:12]) * self.scale_max[0]
         scale_y = self.scale_act(x[..., 12:13]) * self.scale_max[1]
         scale_z = self.scale_act(x[..., 13:14]) * self.scale_max[2]
-
         if debug:
             opacity[:] = 1.0
             scale_x[:] = 0.5
@@ -266,5 +278,4 @@ class VolumeGaussianDecoder(BaseModule):
             rgbs[..., 2] = 0.0
 
         gaussians = torch.cat([gs_positions, rgbs, opacity, rotation, scale_x, scale_y, scale_z], dim=-1) # bs, w, h, z, gpv, 14
-    
         return gaussians

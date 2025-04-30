@@ -271,7 +271,7 @@ class OmniGaussian(BaseModule):
                 far_depth_pred_mask.append(depth_pred_i)
         
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
-        gaussians_volume_near = self.near_volume_gs(
+        gaussians_volume_near, gaussians_volume_near_filtered, gaussians_confidence_near = self.near_volume_gs(
                 [img_feats[0]],
                 near_gaussians_pixel_mask,
                 near_gaussians_feat_mask,
@@ -279,7 +279,7 @@ class OmniGaussian(BaseModule):
                 near_depth_pred_mask,
                 data_dict["img_metas"])
 
-        gaussians_volume_far = self.far_volume_gs(
+        gaussians_volume_far, gaussians_volume_far_filtered, gaussians_confidence_far = self.far_volume_gs(
                 [img_feats[0]],
                 far_gaussians_pixel_mask,
                 far_gaussians_feat_mask,
@@ -287,6 +287,10 @@ class OmniGaussian(BaseModule):
                 far_depth_pred_mask,
                 data_dict["img_metas"])        
         
+        gaussians_volume_filtered = torch.cat([gaussians_volume_near_filtered, gaussians_volume_far_filtered], dim=1)
+        gaussians_volume_filtered_target = torch.zeros_like(gaussians_volume_filtered, device=gaussians_volume_filtered.device)
+        gaussians_confidence = torch.cat([gaussians_confidence_near, gaussians_confidence_far], dim=1)
+
         gaussians_volume = torch.cat([gaussians_volume_near, gaussians_volume_far], dim=1)
         gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
 
@@ -365,16 +369,16 @@ class OmniGaussian(BaseModule):
         # mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm
 
-        test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d.png')
-        test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_fuse_mp3d.png')
-        test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d.png')
-        test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d.png')
-        test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d.png')
+        # test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_pixel_mp3d_cos.png')
+        # test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_fuse_mp3d_cos.png')
+        # test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
+        # test_img.save('render_volume_mp3d_cos.png')
+        # test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
+        # test_img.save('render_gt_mp3d_cos.png')
+        # test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
+        # test_img.save('render_bev_mp3d_cos.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
@@ -451,6 +455,12 @@ class OmniGaussian(BaseModule):
             loss = loss + self.loss_args.weight_depth_abs_vol * depth_abs_loss_vol
             set_loss("depth_abs_vol", split, depth_abs_loss_vol, self.loss_args.weight_depth_abs_vol)
         
+        # ====================Volume loss ===================== #
+        if self.loss_args.weight_volume_loss > 0  and iter < iter_end - 1000:
+            volume_loss = F.mse_loss(gaussians_confidence * gaussians_volume_filtered, gaussians_volume_filtered_target, reduction='mean')
+            loss = loss + self.loss_args.weight_volume_loss * volume_loss
+            set_loss("volume", split, volume_loss, self.loss_args.weight_volume_loss)
+
         return loss, loss_terms, render_pkg_fuse, render_pkg_pixel, render_pkg_volume, gaussians_all, gaussians_pixel, gaussians_volume, data_dict
     
     def validation_step(self, batch, val_result_savedir):
@@ -526,7 +536,7 @@ class OmniGaussian(BaseModule):
                 far_depth_pred_mask.append(depth_pred_i)
         
         with self.benchmarker.time("volume_gs"):
-            gaussians_volume_near = self.near_volume_gs(
+            gaussians_volume_near, _, _ = self.near_volume_gs(
                     [img_feats[0]],
                     near_gaussians_pixel_mask,
                     near_gaussians_feat_mask,
@@ -534,7 +544,7 @@ class OmniGaussian(BaseModule):
                     near_depth_pred_mask,
                     data_dict["img_metas"], status='test')
 
-            gaussians_volume_far = self.far_volume_gs(
+            gaussians_volume_far, _, _ = self.far_volume_gs(
                     [img_feats[0]],
                     far_gaussians_pixel_mask,
                     far_gaussians_feat_mask,

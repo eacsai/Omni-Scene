@@ -2,6 +2,7 @@
 import torch, torch.nn as nn, torch.nn.functional as F
 from mmengine.model import BaseModule
 from mmengine.registry import MODELS
+from vis_feat import single_features_to_RGB
 
 def sigmoid_scaling(scaling:torch.Tensor, lower_bound=0.005, upper_bound=0.02):
     sig = torch.sigmoid(scaling)
@@ -154,6 +155,10 @@ class VolumeGaussianDecoderOriginal(BaseModule):
                 size=(self.tpv_w*self.scale_w, self.tpv_z*self.scale_z),
                 mode='bilinear'
             )
+
+        # single_features_to_RGB(tpv_hw, img_name='feat_hw.png')
+        # single_features_to_RGB(tpv_zh, img_name='feat_zh.png')
+        # single_features_to_RGB(tpv_wz, img_name='feat_wz.png')
 
         #print("before voxelize:{}".format(torch.cuda.memory_allocated(0)))
         tpv_hw = tpv_hw.unsqueeze(-1).permute(0, 1, 3, 2, 4).expand(-1, -1, -1, -1, self.scale_z*self.tpv_z)

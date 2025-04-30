@@ -33,6 +33,18 @@ python train_mp3d.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical
 
 python train_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_cos.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_cos
+
+python train_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf_10000.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf_10000
+
+python train_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf
+
+python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross
 
@@ -61,12 +73,17 @@ python evaluate_mp3d.py \
 python evaluate_mp3d.py \
     --py-config "configs/OmniScene/omni_gs_160x320_mp3d.py" \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d" \
+    --load-from "checkpoint-6000"
+
+python evaluate_mp3d.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf" \
     --load-from "checkpoint-3000"
 
 python evaluate_mp3d.py \
-    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross.py" \
-    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross" \
-    --load-from "checkpoint-3000"
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf" \
+    --load-from "checkpoint-36000"
 
 python evaluate_mp3d_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double.py \
@@ -76,4 +93,4 @@ python evaluate_mp3d_double.py \
 python evaluate_mp3d_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_double.py \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_double" \
-    --load-from "checkpoint-3000"
+    --load-from "checkpoint-27000"

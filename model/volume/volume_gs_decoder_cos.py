@@ -10,7 +10,7 @@ def sigmoid_scaling(scaling:torch.Tensor, lower_bound=0.005, upper_bound=0.02):
     return lower_bound * (1 - sig) + upper_bound * sig
 
 @MODELS.register_module()
-class VolumeGaussianDecoder(BaseModule):
+class VolumeGaussianDecoderCos(BaseModule):
     def __init__(
         self, tpv_h, tpv_w, tpv_z, pc_range, gs_dim=14,
         in_dims=64, hidden_dims=128, out_dims=None,
@@ -61,7 +61,17 @@ class VolumeGaussianDecoder(BaseModule):
             # obtain anchor points for gaussians        
             # r = torch.linspace(0.5, self.tpv_z-0.5, self.tpv_z, device='cuda')
             # anchors_coordinates = sample_concentrating_sphere(r, 2000, threshold=3.0, device='cuda') # [N_radii * n_samples, 3]
-            gs_anchors = self.get_panorama_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
+            
+            # k = torch.arange(self.tpv_h) # 0 to M-1
+            # h_k = -1 + (k + 0.5) * (2.0 / self.tpv_h) # M 个 cos(phi) 的值，范围在 (-1, 1) 内
+            # # 限制在 [-1, 1] 防止数值误差
+            # h_k = torch.clip(h_k, -1.0, 1.0)
+
+            h_k = torch.linspace(-0.98, 0.98, steps=self.tpv_h)
+            # 计算对应的 phi 值
+            ref_phis = torch.flip(torch.arccos(h_k), dims=[0]) # M 个 phi 的值，范围在 (0, pi) 内
+
+            gs_anchors = self.get_panorama_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range, ref_phis) # 1, w, h, z, 3
             # gs_anchors = self.get_sample_reference_points(anchors_coordinates, pc_range[5] - pc_range[2]) # [num_points, 1, 3]
             # mask_lower = gs_anchors[:, 0, 1] >= -2.5
             # mask_upper = gs_anchors[:, 0, 1] <= 2.5
@@ -113,7 +123,7 @@ class VolumeGaussianDecoder(BaseModule):
         return torch.cat((theta,phi,r), dim=-1) # num_points, 3
 
     @staticmethod
-    def get_panorama_reference_points(H, W, Z, pc_range, dim='3d', bs=1, device='cuda', dtype=torch.float):
+    def get_panorama_reference_points(H, W, Z, pc_range, ref_phis, dim='3d', bs=1, device='cuda', dtype=torch.float):
         """Get the reference points used in spatial cross-attn and self-attn.
         Args:
             H, W: spatial shape of tpv plane.
@@ -131,8 +141,11 @@ class VolumeGaussianDecoder(BaseModule):
                             device=device)[:-1].view(-1, 1, 1).expand(Z, H, W) / Z  + pc_range[2]
         thetas = 2 * torch.pi * torch.linspace(0, W, W+1, dtype=dtype,
                             device=device)[:-1].view(1, 1, -1).expand(Z, H, W) / W
-        phis = torch.pi * torch.linspace(0, H, H+1, dtype=dtype,
-                            device=device)[:-1].view(1, -1, 1).expand(Z, H, W) / H
+        phis_idx = torch.linspace(0, H, H+1, dtype=dtype,
+                            device=device)[:-1].view(1, -1, 1).expand(Z, H, W).int()
+        phis = ref_phis.to(phis_idx.device)[phis_idx]
+        # phis = torch.pi * torch.linspace(0, H, H+1, dtype=dtype,
+        #                     device=device)[:-1].view(1, -1, 1).expand(Z, H, W) / H
         
         xs = -torch.sin(phis) * torch.sin(thetas) * rs
         ys = -torch.cos(phis) * rs
@@ -196,9 +209,9 @@ class VolumeGaussianDecoder(BaseModule):
         #     anchors_feat = F.grid_sample(tpv_feat, anchors_plane_coordinates[:,l:l+1,:,:], mode='bilinear', padding_mode='zeros', align_corners=False)
         #     anchors_feats.append(anchors_feat.squeeze(2))
         # anchors_feats = anchors_feats[0] + anchors_feats[1] + anchors_feats[2] #[bs, M, c]
-        # single_features_to_RGB(anchors_feats[0], img_name='feat_hw.png')
-        # single_features_to_RGB(anchors_feats[1], img_name='feat_zh.png')
-        # single_features_to_RGB(anchors_feats[2], img_name='feat_wz.png')
+        # # single_features_to_RGB(anchors_feats[0], img_name='feat_hw.png')
+        # # single_features_to_RGB(anchors_feats[1], img_name='feat_zh.png')
+        # # single_features_to_RGB(anchors_feats[2], img_name='feat_wz.png')
         # _, _, num_points = anchors_feats.shape
 
         # gaussians = anchors_feats.permute(0,2,1)
