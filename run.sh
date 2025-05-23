@@ -49,8 +49,12 @@ python train_mp3d.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross
 
 python train_mp3d_double.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double.py \
-    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_double
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double_4.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_double_4
+
+python train_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double_8inverse.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_double_8inverse
 
 python train_mp3d_original_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_double.py \
@@ -64,6 +68,14 @@ python train_360Loc.py \
     --py-config configs/OmniScene/omni_gs_160x320_360Loc_pixel.py \
     --work-dir workdirs/omni_gs_160x320_360Loc_pixel
 
+
+python train_360Loc.py \
+    --py-config configs/OmniScene/omni_gs_160x320_360Loc.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Spherical
+
+python train_360Loc.py \
+    --py-config configs/OmniScene/omni_gs_160x320_360Loc_1.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Spherical_1
 
 python evaluate_mp3d.py \
     --py-config "configs/OmniScene/omni_gs_160x320_mp3d_decare.py" \
@@ -81,8 +93,8 @@ python evaluate_mp3d.py \
     --load-from "checkpoint-3000"
 
 python evaluate_mp3d.py \
-    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf.py" \
-    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf" \
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf_10000.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf_10000" \
     --load-from "checkpoint-36000"
 
 python evaluate_mp3d_double.py \
@@ -91,6 +103,17 @@ python evaluate_mp3d_double.py \
     --load-from "checkpoint-3000"
 
 python evaluate_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double_8.py \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_double_8" \
+    --load-from "checkpoint-3000"
+
+python evaluate_mp3d_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_double.py \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_double" \
     --load-from "checkpoint-27000"
+
+
+python evaluate_360Loc.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_360Loc_1.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Spherical_1" \
+    --load-from "checkpoint-18000"

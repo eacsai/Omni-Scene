@@ -326,9 +326,10 @@ class TPVFormerEncoder(TransformerLayerSequence):
         eps = 1e-5
         tri_reference_points = reference_points.clone()
         spherical_reference_points = torch.ones_like(tri_reference_points, device=tri_reference_points.device)
-        spherical_reference_points[..., 0:1] = -tri_reference_points[..., 2:3] * torch.sin(tri_reference_points[..., 1:2]*torch.pi) * torch.sin(tri_reference_points[..., 0:1]*2*torch.pi)
-        spherical_reference_points[..., 1:2] = -tri_reference_points[..., 2:3] * torch.cos(tri_reference_points[..., 1:2]*torch.pi)
-        spherical_reference_points[..., 2:3] = -tri_reference_points[..., 2:3] * torch.sin(tri_reference_points[..., 1:2]*torch.pi) * torch.cos(tri_reference_points[..., 0:1]*2*torch.pi)
+        spherical_r = tri_reference_points[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
+        spherical_reference_points[..., 0:1] = -spherical_r * torch.sin(tri_reference_points[..., 1:2]*torch.pi) * torch.sin(tri_reference_points[..., 0:1]*2*torch.pi)
+        spherical_reference_points[..., 1:2] = -spherical_r * torch.cos(tri_reference_points[..., 1:2]*torch.pi)
+        spherical_reference_points[..., 2:3] = -spherical_r * torch.sin(tri_reference_points[..., 1:2]*torch.pi) * torch.cos(tri_reference_points[..., 0:1]*2*torch.pi)
         B_ref, D, num_query, _ = spherical_reference_points.shape
         
         # init lidar2img

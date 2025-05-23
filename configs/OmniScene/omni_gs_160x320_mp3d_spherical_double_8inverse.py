@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_Spherical_cross_conf"
+exp_name = "omni_gs_160x320_mp3d_Spherical_double_8inverse"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
@@ -61,7 +61,7 @@ dataset_params = dict(
     num_workers_test=32
 )
 
-num_cams = 1
+num_cams = 2
 near = 0.1
 far = 15.0
 camera_args = dict(
@@ -84,10 +84,10 @@ loss_args = dict(
     perceptual_resolution=[resolution[0], resolution[1]],
     weight_recon=1.0,
     weight_perceptual=0.05,
-    weight_depth_abs=1.0,
+    weight_depth_abs=0.01,
     weight_recon_vol=1.0,
     weight_perceptual_vol=0.05,
-    weight_depth_abs_vol=1.0,
+    weight_depth_abs_vol=0.01,
     weight_volume_loss=1.0,
 )
 
@@ -112,11 +112,11 @@ gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
 # num_points = [16, 32, 32]
-near_num_points_in_pillar = [1, 8, 4]
-near_num_points = [2, 16, 8]
+near_num_points_in_pillar = [8, 8, 4]
+near_num_points = [16, 16, 8]
 
-far_num_points_in_pillar = [1, 32, 16]
-far_num_points = [2, 64, 32]
+far_num_points_in_pillar = [8, 32, 16]
+far_num_points = [16, 64, 32]
 
 hybrid_attn_anchors = 16
 hybrid_attn_points = 32

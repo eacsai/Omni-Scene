@@ -5,15 +5,15 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_Spherical_cross_conf"
+exp_name = "omni_gs_160x320_360Loc_Spherical_1"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
 grad_max_norm = 1.0
 print_freq = 100
-save_freq = 3000
-val_freq = 3000
-max_epochs = 20
+save_freq = 1500
+val_freq = 1500
+max_epochs = 15
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
@@ -21,7 +21,7 @@ max_train_steps = 5000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = False
+resume_from = "checkpoint_mp3d-0000"
 report_to = "tensorboard"
 
 volume_only = False
@@ -32,18 +32,14 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 task = 'spherical' # 'spherical' or 'square'
-if task == 'spherical':
-    near_point_cloud_range = [0.0, 0.0, 0.0, 32.0, 16.0, 4.0] #
-    far_point_cloud_range = [0.0, 0.0, 4.0, 32.0, 16.0, 8.0]
-    point_cloud_range = [0.0, 0.0, 0.0, 32.0, 16.0, 8.0]
-    scale_h = 1
-    scale_w = 1
-    scale_z = 1
-else:
-    point_cloud_range = [-10.0, -3.0, -10.0, 10.0, 3.0, 10.0]
-    scale_h = 0.25
-    scale_w = 0.5
-    scale_z = 2
+
+near_point_cloud_range = [0.0, 0.0, 0.0, 32.0, 16.0, 4.0] #
+far_point_cloud_range = [0.0, 0.0, 4.0, 32.0, 16.0, 20.0]
+point_cloud_range = [0.0, 0.0, 0.0, 32.0, 16.0, 20.0]
+scale_h = 1
+scale_w = 1
+scale_z = 1
+
 
 dataset_params = dict(
     dataset_name="nuScenesDataset",
@@ -88,7 +84,7 @@ loss_args = dict(
     weight_recon_vol=1.0,
     weight_perceptual_vol=0.05,
     weight_depth_abs_vol=1.0,
-    weight_volume_loss=1.0,
+    weight_volume_loss=0.0,
 )
 
 pc_range = point_cloud_range
@@ -244,7 +240,7 @@ far_self_layer = dict(
 
 
 model = dict(
-    type='OmniGaussian',
+    type='OmniGaussian360Loc',
     use_checkpoint=use_checkpoint,
     task=task,
     near_point_cloud_range=near_point_cloud_range,
@@ -391,8 +387,8 @@ model = dict(
             scale_w=scale_w,
             scale_z=scale_z,
             gpv=gpv,
-            offset_max=[0.5, 0.5, 0.5],
-            scale_max=[0.5, 0.5, 0.5],
+            offset_max=[2.0, 2.0, 2.0],
+            scale_max=[2.0, 2.0, 2.0],
             task=task
         )
     ),

@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_Spherical_cross_conf"
+exp_name = "omni_gs_160x320_mp3d_Spherical_double_4"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
@@ -61,7 +61,7 @@ dataset_params = dict(
     num_workers_test=32
 )
 
-num_cams = 1
+num_cams = 2
 near = 0.1
 far = 15.0
 camera_args = dict(
@@ -112,11 +112,11 @@ gpv = 2
 
 # num_points_in_pillar = [8, 16, 16]
 # num_points = [16, 32, 32]
-near_num_points_in_pillar = [1, 8, 4]
-near_num_points = [2, 16, 8]
+near_num_points_in_pillar = [4, 8, 4]
+near_num_points = [8, 16, 8]
 
-far_num_points_in_pillar = [1, 32, 16]
-far_num_points = [2, 64, 32]
+far_num_points_in_pillar = [4, 32, 16]
+far_num_points = [8, 64, 32]
 
 hybrid_attn_anchors = 16
 hybrid_attn_points = 32

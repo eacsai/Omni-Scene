@@ -101,7 +101,7 @@ def one_sample(scene, extrinsics, stage="train", i=0):
 
     return (
         torch.tensor([index_context_left]),
-        torch.tensor((index_context_left - 2, index_context_left, index_context_left + 2)),
+        torch.tensor((index_context_left - context_gap//2, index_context_left, index_context_left + context_gap//2)),
     )
 
 class Dataset360Loc(IterableDataset):
@@ -120,6 +120,7 @@ class Dataset360Loc(IterableDataset):
 
         if stage == "train":
             locations = ['concourse', 'hall', 'piatrium']
+            # locations = ['hall']
         else:
             locations = ['atrium']
         root = Path('/data/qiwei/nips25/360Loc')
@@ -129,7 +130,7 @@ class Dataset360Loc(IterableDataset):
             seqs = sum(seqs, [])
             self.data.extend(seqs)
 
-        self.times_per_scene = 1000 if self.stage == "train" else 100
+        self.times_per_scene = 1000 if self.stage == "train" else 20
         self.load_images = True
         self.direction = get_panorama_ray_directions(self.height, self.width)
 
@@ -261,7 +262,7 @@ class Dataset360Loc(IterableDataset):
                     "rays_d": input_rays_d
                 }
 
-                input_dict_vol = {"w2i": target_extrinsics_relative}
+                input_dict_vol = {"w2i": torch.eye(4,4)[None,:,:]}
 
                 output_dict = {
                     "rgb": target_images, 
@@ -350,7 +351,7 @@ def load_360Loc_data(batch_size, stage='train'):
         area: same | cross
     """
 
-    MP3D = Dataset360Loc(stage = stage)
+    Loc360 = Dataset360Loc(stage = stage)
 
     if stage == 'train':
         seed = 1234
@@ -370,9 +371,9 @@ def load_360Loc_data(batch_size, stage='train'):
         persistent_workers = True
 
     dataloader = DataLoader(
-        MP3D, 
+        Loc360, 
         batch_size=batch_size,
-        num_workers=32,
+        num_workers=1,
         generator=get_generator(seed),
         worker_init_fn=worker_init_fn,
         persistent_workers=persistent_workers,

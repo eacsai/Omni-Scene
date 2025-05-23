@@ -1,6 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -111,14 +111,14 @@ def main(args):
     #    num_training_steps=cfg.max_train_steps*accelerator.num_processes,
     #)
     # consine lr scheduler
-    warm_up = torch.optim.lr_scheduler.LinearLR(
-        optimizer,
-        1 / (cfg.warmup_steps*accelerator.num_processes),
-        1,
-        total_iters=cfg.warmup_steps*accelerator.num_processes,
-    )
+    # warm_up = torch.optim.lr_scheduler.LinearLR(
+    #     optimizer,
+    #     1 / (cfg.warmup_steps*accelerator.num_processes),
+    #     1,
+    #     total_iters=cfg.warmup_steps*accelerator.num_processes,
+    # )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.max_train_steps*accelerator.num_processes, eta_min=cfg.lr * 0.1)
-    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warm_up, scheduler], milestones=[cfg.warmup_steps*accelerator.num_processes])
+    # scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warm_up, scheduler], milestones=[cfg.warmup_steps*accelerator.num_processes])
 
     # generate datasets
     # dataset = getattr(datasets, dataset_config.dataset_name)
