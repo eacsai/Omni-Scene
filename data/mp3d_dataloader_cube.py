@@ -76,6 +76,37 @@ class DatasetMP3D(Dataset):
         self.data = data
         self.direction = get_panorama_ray_directions(self.height, self.width)
 
+        self.extrinsics = torch.tensor([[[ 1.,  0.,  0.,  0.],
+                                        [ 0.,  1.,  0.,  0.],
+                                        [ 0.,  0.,  1.,  0.],
+                                        [ 0.,  0.,  0.,  1.]],
+
+                                        [[ 0.,  0., -1.,  0.],
+                                        [ 0.,  1.,  0.,  0.],
+                                        [ 1.,  0.,  0.,  0.],
+                                        [ 0.,  0.,  0.,  1.]],
+
+                                        [[-1.,  0.,  0.,  0.],
+                                        [ 0.,  1.,  0.,  0.],
+                                        [-0.,  0., -1.,  0.],
+                                        [ 0.,  0.,  0.,  1.]],
+
+                                        [[ 0.,  0.,  1.,  0.],
+                                        [ 0.,  1.,  0.,  0.],
+                                        [-1.,  0.,  0.,  0.],
+                                        [ 0.,  0.,  0.,  1.]],
+
+                                        [[ 1.,  0.,  0.,  0.],
+                                        [ 0.,  0.,  1.,  0.],
+                                        [ 0., -1.,  0.,  0.],
+                                        [ 0.,  0.,  0.,  1.]],
+
+                                        [[ 1.,  0.,  0.,  0.],
+                                        [ 0.,  0., -1.,  0.],
+                                        [ 0.,  1.,  0.,  0.],
+                                        [ 0.,  0.,  0.,  1.]]]
+                                    )
+
     def __getitem__(self, idx):
         data = self.data[idx].copy()
         scene = data['scene_id']
@@ -86,7 +117,7 @@ class DatasetMP3D(Dataset):
         # Load the images.
         rgbs_path = [str(scene_path / v / 'rgb.png') for v in views]
         context_indices = torch.tensor([1])
-        target_indices = torch.tensor([0, 1, 2])
+        target_indices = torch.tensor([1])
         context_images = [rgbs_path[i] for i in context_indices]
         target_images = [rgbs_path[i] for i in target_indices]
         context_images = self.convert_images(context_images)
@@ -146,15 +177,16 @@ class DatasetMP3D(Dataset):
         input_dict = {"rgb": context_images}
 
         # process rays
-        output_fovxs = torch.deg2rad(torch.tensor([90], dtype=torch.float32)).repeat(len(target_indices))
-        output_fovys = torch.deg2rad(torch.tensor([90], dtype=torch.float32)).repeat(len(target_indices))
+        output_fovxs = torch.deg2rad(torch.tensor([90], dtype=torch.float32)).repeat(len(target_indices) * 6)
+        output_fovys = torch.deg2rad(torch.tensor([90], dtype=torch.float32)).repeat(len(target_indices) * 6)
         input_directions = output_directions = self.direction.unsqueeze(0)
         input_rays_o, input_rays_d = get_rays(
             input_directions, extrinsics[context_indices], keepdim=True, normalize=False)
         
         c2b = torch.inverse(self.extrinsics)
-        output_c2w = extrinsics[target_indices] @ c2b
-        
+        output_c2w = extrinsics[target_indices][:, None, :, :] @ c2b[None, :, :, :]
+        output_c2w = output_c2w.reshape(len(target_indices) * 6, 4, 4)
+
         output_rays_o, output_rays_d = get_rays(
                             output_directions, extrinsics[target_indices], keepdim=True, normalize=False)
         
@@ -171,7 +203,7 @@ class DatasetMP3D(Dataset):
             "rays_d": input_rays_d
         }
 
-        input_dict_vol = {"w2i": extrinsics[context_indices]}
+        input_dict_vol = {"w2i": torch.inverse(extrinsics[context_indices])}
 
         output_dict = {
             "rgb": target_images, 
@@ -202,7 +234,7 @@ class DatasetMP3D(Dataset):
         # Convert the extrinsics to a 4x4 OpenCV-style W2C matrix.
         c2w = repeat(torch.eye(4, dtype=torch.float32), "h w -> b h w", b=b).clone()
         c2w[:, :3, :3] = rots
-        c2w[:, :3, 3] = trans
+        c2w[:, :3, 3] = -trans
         # w2w = torch.tensor([  # X -> X, -Z -> Y, upY -> Z
         #     [1, 0, 0, 0],
         #     [0, 0, -1, 0],

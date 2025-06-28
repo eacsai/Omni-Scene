@@ -151,7 +151,7 @@ class DatasetMP3D(Dataset):
         input_rays_o, input_rays_d = get_rays(
             input_directions, extrinsics[context_indices], keepdim=True, normalize=False)
         output_rays_o, output_rays_d = get_rays(
-                            output_directions, extrinsics[target_indices], keepdim=True, normalize=False)
+            output_directions, extrinsics[target_indices], keepdim=True, normalize=False)
         
         input_dict_pix = {
             "depth_m": context_m_depths, 

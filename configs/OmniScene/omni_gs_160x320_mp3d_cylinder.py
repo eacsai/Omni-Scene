@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_Cylinder"
+exp_name = "omni_gs_160x320_mp3d_cylinder_18000"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
@@ -13,11 +13,12 @@ grad_max_norm = 1.0
 print_freq = 100
 save_freq = 3000
 val_freq = 3000
-max_epochs = 10
+max_epochs = 15
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
 max_train_steps = 5000
+volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
@@ -34,7 +35,7 @@ resolution = [160, 320]
 
 near_point_cloud_range = [0.0, 0.0, -4.0, 4.0, 6.28, 4.0] # r, phi, z
 far_point_cloud_range = [4.0, 0.0, -4.0, 8.0, 6.28, 4.0]
-point_cloud_range = [0.0, 0.0, -2.0, 8.0, 6.28, 2.0] # r, phi, z
+point_cloud_range = [0.0, 0.0, -4.0, 8.0, 6.28, 4.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1
@@ -95,20 +96,20 @@ patch_sizes=[8, 8, 4, 2]
 _ffn_dim_ = _dim_ * 2
 
 near_tpv_theta_ = 32  # theta
-near_tpv_r_ = 8  # r
+near_tpv_r_ = 16  # r
 near_tpv_z_ = 32  # z
 
 far_tpv_theta_ = 64  # theta
 far_tpv_r_ = 16  # r
-far_tpv_z_ = 32  # z
+far_tpv_z_ = 64  # z
 
 gpv = 2
 
 near_num_points_in_pillar = [16, 4, 16]
 near_num_points = [32, 8, 32]
 
-far_num_points_in_pillar = [16, 8, 32]
-far_num_points = [32, 16, 64]
+far_num_points_in_pillar = [32, 4, 32]
+far_num_points = [64, 8, 64]
 
 # near_num_points_in_pillar = [4, 4, 4]
 # near_num_points = [8, 8, 8]

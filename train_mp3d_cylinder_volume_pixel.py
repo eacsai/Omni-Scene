@@ -20,6 +20,7 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
 
 from data.mp3d_dataloader import load_MP3D_data
+
 # from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
@@ -155,11 +156,9 @@ def main(args):
     first_epoch = 0
 
     # Potentially load in the weights and states from a previous save
-    if args.resume_from:
-        cfg.resume_from = args.resume_from
     if cfg.resume_from:
         if cfg.resume_from != "latest":
-            path = os.path.basename(cfg.resume_from)
+            path = cfg.resume_from
         else:
             # Get the most recent checkpoint
             dirs = os.listdir(cfg.work_dir)
@@ -180,6 +179,9 @@ def main(args):
     # else:
     #     resume_step = -1
     
+    accelerator.print(f"Resuming from checkpoint {path}")
+    accelerator.load_state(osp.join(path), map_location='cpu', strict=False)
+
     print('work dir: ', args.work_dir)
     
     # training

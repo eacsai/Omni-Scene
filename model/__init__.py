@@ -5,3 +5,7 @@ from .omni_gs_pixel import OmniGaussianPixel
 from .omni_gs_origin import OmniGaussianOriginal
 from .omni_gs_360Loc import OmniGaussian360Loc
 from .omni_gs_cylinder import OmniGaussianCylinder
+from .omni_gs_cylinder_volume import OmniGaussianCylinderVolume
+from .omni_gs_cylinder_pixel import OmniGaussianCylinderPixel
+from .omni_gs_cylinder_volume_pixel import OmniGaussianCylinderVolumePixel
+from .omni_gs_cylinder_pixel_volume import OmniGaussianCylinderPixelVolume

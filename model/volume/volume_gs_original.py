@@ -41,7 +41,7 @@ class VolumeGaussianOriginal(BaseModule):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, img_feats, candidate_gaussians, candidate_feats, candidate_uv_map, candidate_depth_pred,img_metas=None, status="train"):
+    def forward(self, img_feats, candidate_gaussians, candidate_feats, img_metas=None, status="train"):
         """Forward training function.
         """
         if candidate_gaussians is not None and candidate_feats is not None:

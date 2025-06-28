@@ -36,13 +36,25 @@ python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_cos.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_cos
 
-python train_mp3d.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf_10000.py \
-    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf_10000
+python train_mp3d_cylinder.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_18000
 
-python train_mp3d.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf.py \
-    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf
+python train_mp3d_cylinder_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double
+
+python train_mp3d_cylinder_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_pixel.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel
+
+python train_mp3d_cylinder_volume.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_volume.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_volume
+
+python train_mp3d_cylinder_volume.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_pixel.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_pixel
 
 python train_mp3d.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross.py \
@@ -78,9 +90,14 @@ python train_360Loc.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Spherical_1
 
 python evaluate_mp3d.py \
-    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_decare.py" \
-    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_decare" \
-    --load-from "checkpoint-6000"
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_pixel_volume.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_pixel_volume" \
+    --load-from "checkpoint-27000"
+
+python evaluate_mp3d.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_volume_pixel.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_volume_pixel" \
+    --load-from "checkpoint-3000"
 
 python evaluate_mp3d.py \
     --py-config "configs/OmniScene/omni_gs_160x320_mp3d.py" \
@@ -93,16 +110,22 @@ python evaluate_mp3d.py \
     --load-from "checkpoint-3000"
 
 python evaluate_mp3d.py \
-    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf_10000.py" \
-    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf_10000" \
-    --load-from "checkpoint-36000"
+    --py-config "configs/OmniScene/omni_gs_160x320_mp3d_cylinder.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_18000" \
+    --load-from "checkpoint-3000"
 
-python evaluate_mp3d_double.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double.py \
-    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_double" \
+
+python evaluate_mp3d.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_volume.py \
+    --output-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_volume \
     --load-from "checkpoint-3000"
 
 python evaluate_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double.py \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double" \
+    --load-from "checkpoint-33000"
+
+python evaluate_mp3d_volume.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_spherical_double_8.py \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_double_8" \
     --load-from "checkpoint-3000"
@@ -112,6 +135,20 @@ python evaluate_mp3d_double.py \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_double" \
     --load-from "checkpoint-27000"
 
+python evaluate_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_pixel.py \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel" \
+    --load-from "checkpoint-3000"
+
+python evaluate_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_volume.py \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume" \
+    --load-from "checkpoint-3000"
+
+python evaluate_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_all.py \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all" \
+    --load-from "checkpoint-3000"
 
 python evaluate_360Loc.py \
     --py-config "configs/OmniScene/omni_gs_160x320_360Loc_1.py" \

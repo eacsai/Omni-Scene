@@ -1,39 +1,37 @@
+import os
 import math
-import numpy as np
+
 import torch
-import torch.nn as nn
+from torch import nn
+
 import torch.nn.functional as F
+import numpy as np
 
-from einops import rearrange
-from pano2cube import Equirec2Cube, Cube2Equirec
+renderer_type = 'vanilla' # "vanilla" or "panorama"
 
-renderer_type = 'panorama' # "vanilla" or "panorama"
+from diff_surfel_rasterization import (
+    GaussianRasterizationSettings,
+    GaussianRasterizer,
+)
 
 if renderer_type == 'panorama':
-    from pano_gaussian import (
-        GaussianRasterizationSettings, 
-        GaussianRasterizer
-    )
+    from pano_gaussian import GaussianRasterizationSettings as ThreeDGaussianRasterizationSettings
+    from pano_gaussian import GaussianRasterizer as ThreeDGaussianRasterizer
+
 else:
-    from diff_gaussian_rasterization import (
-        GaussianRasterizationSettings, 
-        GaussianRasterizer
-    )
+    from diff_gaussian_rasterization import GaussianRasterizationSettings as ThreeDGaussianRasterizationSettings
+    from diff_gaussian_rasterization import GaussianRasterizer as ThreeDGaussianRasterizer
+
+from pano2cube import Equirec2Cube, Cube2Equirec
+from .cam_utils import MiniCam
 
 from .utils.ops import get_cam_info_gaussian
 from .utils.typing import *
 
 
 C0 = 0.28209479177387814
-
-
 def RGB2SH(rgb):
     return (rgb - 0.5) / C0
-
-
-def SH2RGB(sh):
-    return sh * C0 + 0.5
-
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -49,47 +47,65 @@ def strip_lowerdiag(L):
     uncertainty[:, 5] = L[:, 2, 2]
     return uncertainty
 
-
 def strip_symmetric(sym):
     return strip_lowerdiag(sym)
 
-
 def build_rotation(r):
-    norm = torch.sqrt(
-        r[:, 0] * r[:, 0] + r[:, 1] * r[:, 1] + r[:, 2] * r[:, 2] + r[:, 3] * r[:, 3]
-    )
+    norm = torch.sqrt(r[:,0]*r[:,0] + r[:,1]*r[:,1] + r[:,2]*r[:,2] + r[:,3]*r[:,3])
 
     q = r / norm[:, None]
 
-    R = torch.zeros((q.size(0), 3, 3), device="cuda")
+    R = torch.zeros((q.size(0), 3, 3), device='cuda')
 
     r = q[:, 0]
     x = q[:, 1]
     y = q[:, 2]
     z = q[:, 3]
 
-    R[:, 0, 0] = 1 - 2 * (y * y + z * z)
-    R[:, 0, 1] = 2 * (x * y - r * z)
-    R[:, 0, 2] = 2 * (x * z + r * y)
-    R[:, 1, 0] = 2 * (x * y + r * z)
-    R[:, 1, 1] = 1 - 2 * (x * x + z * z)
-    R[:, 1, 2] = 2 * (y * z - r * x)
-    R[:, 2, 0] = 2 * (x * z - r * y)
-    R[:, 2, 1] = 2 * (y * z + r * x)
-    R[:, 2, 2] = 1 - 2 * (x * x + y * y)
+    R[:, 0, 0] = 1 - 2 * (y*y + z*z)
+    R[:, 0, 1] = 2 * (x*y - r*z)
+    R[:, 0, 2] = 2 * (x*z + r*y)
+    R[:, 1, 0] = 2 * (x*y + r*z)
+    R[:, 1, 1] = 1 - 2 * (x*x + z*z)
+    R[:, 1, 2] = 2 * (y*z - r*x)
+    R[:, 2, 0] = 2 * (x*z - r*y)
+    R[:, 2, 1] = 2 * (y*z + r*x)
+    R[:, 2, 2] = 1 - 2 * (x*x + y*y)
     return R
-
 
 def build_scaling_rotation(s, r):
     L = torch.zeros((s.shape[0], 3, 3), dtype=torch.float, device="cuda")
     R = build_rotation(r)
 
-    L[:, 0, 0] = s[:, 0]
-    L[:, 1, 1] = s[:, 1]
-    L[:, 2, 2] = s[:, 2]
+    L[:,0,0] = s[:,0]
+    L[:,1,1] = s[:,1]
+    L[:,2,2] = s[:,2]
 
     L = R @ L
     return L
+
+def covariance_from_scaling_rotation(scaling, rotation, c2ws):
+    L = build_scaling_rotation(scaling, rotation)
+    actual_covariance = L @ L.transpose(1, 2)
+    symm = strip_symmetric(actual_covariance)
+    return symm
+
+def depths_to_points(rays, depthmap):
+    points = rays[...,:3].view(-1,3)  + depthmap.view(-1, 1) * rays[...,3:].view(-1,3)
+    return points
+
+def depth_to_normal(rays, depth):
+    """
+        view: view camera
+        depth: depthmap 
+    """
+    points = depths_to_points(rays, depth).reshape(*depth.shape[1:], 3)
+    output = torch.zeros_like(points)
+    dx = torch.cat([points[2:, 1:-1] - points[:-2, 1:-1]], dim=0)
+    dy = torch.cat([points[1:-1, 2:] - points[1:-1, :-2]], dim=1)
+    normal_map = torch.nn.functional.normalize(torch.cross(dx, dy, dim=-1), dim=-1)
+    output[1:-1, 1:-1, :] = normal_map
+    return output, points
 
 def compute_equal_aabb_with_margin(
     minima: Float[Tensor, "*#batch 3"],
@@ -105,37 +121,179 @@ def compute_equal_aabb_with_margin(
     scene_maxima = midpoint + 0.5 * span
     return scene_minima, scene_maxima
 
-class Depth2Normal(torch.nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.delzdelxkernel = torch.tensor(
-            [
-                [0.00000, 0.00000, 0.00000],
-                [-1.00000, 0.00000, 1.00000],
-                [0.00000, 0.00000, 0.00000],
-            ]
-        )
-        self.delzdelykernel = torch.tensor(
-            [
-                [0.00000, -1.00000, 0.00000],
-                [0.00000, 0.00000, 0.00000],
-                [0.0000, 1.00000, 0.00000],
-            ]
+class Renderer(nn.Module):
+    def __init__(self, sh_degree=3, white_background=True, radius=1):
+        super(Renderer, self).__init__()
+        
+        self.sh_degree = sh_degree
+        self.white_background = white_background
+        self.radius = radius
+
+        self.setup_functions()
+        
+        self.bg_color = torch.tensor(
+            [0, 0, 0],
+            dtype=torch.float32,
         )
 
-    @torch.cuda.amp.autocast(enabled=False)
-    def forward(self, x):
-        B, C, H, W = x.shape
-        delzdelxkernel = self.delzdelxkernel.view(1, 1, 3, 3).to(x.device)
-        delzdelx = F.conv2d(
-            x.reshape(B * C, 1, H, W), delzdelxkernel, padding=1
-        ).reshape(B, C, H, W)
-        delzdelykernel = self.delzdelykernel.view(1, 1, 3, 3).to(x.device)
-        delzdely = F.conv2d(
-            x.reshape(B * C, 1, H, W), delzdelykernel, padding=1
-        ).reshape(B, C, H, W)
-        normal = -torch.cross(delzdelx, delzdely, dim=1)
-        return normal
+    def setup_functions(self):
+        
+        self.scaling_activation = torch.exp
+        self.scaling_inverse_activation = torch.log
+
+        self.opacity_activation = torch.sigmoid
+        self.inverse_opacity_activation = inverse_sigmoid
+
+        self.rotation_activation = torch.nn.functional.normalize
+
+    def set_bg_color(self, bg):
+        self.bg_color = bg
+        
+    def set_rasterizer(self, viewpoint_camera, scaling_modifier=1.0, device="cuda"):
+        # Set up rasterization configuration
+
+        raster_settings = GaussianRasterizationSettings(
+            image_height=int(viewpoint_camera.image_height),
+            image_width=int(viewpoint_camera.image_width),
+            tanfovx=viewpoint_camera.tan_half_fovx,
+            tanfovy=viewpoint_camera.tan_half_fovy,
+            bg=self.bg_color.to(device),
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint_camera.world_view_transform,
+            projmatrix=viewpoint_camera.full_proj_transform,
+            sh_degree=self.sh_degree,
+            campos=viewpoint_camera.camera_center,
+            prefiltered=False,
+            debug=False,
+        )
+
+        return GaussianRasterizer(raster_settings=raster_settings)
+
+
+    def get_params(self, position_lr_init=0.00016,feature_lr=0.0025,opacity_lr=0.05,scaling_lr=0.005,rotation_lr=0.001):
+        l = [
+            {'params': [self._xyz], 'lr': position_lr_init, "name": "xyz"},
+            {'params': [self._features_dc], 'lr': feature_lr, "name": "f_dc"},
+            {'params': [self._features_rest], 'lr': feature_lr / 20.0, "name": "f_rest"},
+            {'params': [self._opacity], 'lr': opacity_lr, "name": "opacity"},
+            {'params': [self._scaling], 'lr': scaling_lr, "name": "scaling"},
+            {'params': [self._rotation], 'lr': rotation_lr, "name": "rotation"}
+        ]
+        return l
+
+
+    
+    def get_scaling(self, _scaling):
+        return self.scaling_activation(_scaling)
+    
+    def get_rotation(self, _rotation):
+        return self.rotation_activation(_rotation)
+    
+    def get_opacity(self, _opacity):
+        return self.opacity_activation(_opacity)
+
+    def get_covariance(self, _scaling, _rotation, c2ws):
+        return covariance_from_scaling_rotation(self.get_scaling(_scaling), self.get_rotation(_rotation), c2ws)
+    
+    def render_img(
+            self,
+            cam,
+            rays,
+            centers,
+            shs,
+            colors_precomp,
+            opacity,
+            scales,
+            rotations,
+            device,
+            cov3D_precomp=None,
+            prex='',
+            depth_ratio=0.0
+            ):
+        
+        rasterizer = self.set_rasterizer(cam, device=device)
+
+        centers = centers
+        shs = shs
+        
+        # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
+        screenspace_points = (
+            torch.zeros_like(
+                centers,
+                dtype=centers.dtype,
+                requires_grad=True,
+                device=device,
+            )
+            + 0
+        )
+        try:
+            screenspace_points.retain_grad()
+        except:
+            pass
+  
+        # Rasterize visible Gaussians to image, obtain their radii (on screen).
+        rendered_image, radii, allmap = rasterizer(
+            means3D=centers,
+            means2D=screenspace_points,
+            shs=shs,
+            opacities=opacity,
+            scales=scales[...,:2],
+            rotations=rotations,
+            colors_precomp=colors_precomp,
+            cov3D_precomp=cov3D_precomp,
+        )
+
+        rendered_image = rendered_image.clamp(0, 1)
+        if rays is None:
+            return rendered_image
+
+
+        # additional regularizations
+        render_alpha = allmap[1:2]
+
+        # get normal map
+        render_normal = allmap[2:5]
+        render_normal = (render_normal.permute(1,2,0) @ (cam.world_view_transform[:3,:3].T)).permute(2,0,1)
+        
+        # get median depth map
+        render_depth_median = allmap[5:6]
+        render_depth_median = torch.nan_to_num(render_depth_median, 0, 0)
+
+        # get expected depth map
+        render_depth_expected = allmap[0:1]
+        render_depth_expected = (render_depth_expected / render_alpha)
+        render_depth_expected = torch.nan_to_num(render_depth_expected, 0, 0)
+        
+        # get depth distortion map
+        render_dist = allmap[6:7]
+
+        # psedo surface attributes
+        # surf depth is either median or expected by setting depth_ratio to 1 or 0
+        surf_depth = render_depth_expected * (1-depth_ratio) + depth_ratio * render_depth_median
+        
+        # generate psudo surface normal for regularizations
+        
+        surf_normal, surf_point = depth_to_normal(rays, surf_depth)
+        surf_normal = surf_normal.permute(2,0,1)
+        surf_point = surf_point.permute(2,0,1)
+        # remember to add alphas
+        surf_normal = surf_normal * (render_alpha).detach()
+
+        # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+        # They will be excluded from value updates used in the splitting criteria.
+        return {
+            f"image{prex}": rendered_image,
+            f"depth{prex}": surf_depth,
+            f"acc_map{prex}": render_alpha,
+            f"rend_normal{prex}": render_normal,
+            f"depth_normal{prex}": surf_normal,
+            f"rend_dist{prex}": render_dist,
+            # "viewspace_points": screenspace_points,
+            # "visibility_filter": radii > 0,
+            # "radii": radii,
+        }
+    
+
 
 
 class GaussianRenderer:
@@ -154,10 +312,9 @@ class GaussianRenderer:
         self.zfar = zfar
         self.bg_color = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
 
-        self.normal_module = Depth2Normal().to(device)
-
         self.setup_functions()
         self.C2E = Cube2Equirec(cube_length=80, equ_h=160)
+        self.gs_render = Renderer(sh_degree=0, white_background=False, radius=1)
 
     def setup_functions(self):
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
@@ -178,13 +335,13 @@ class GaussianRenderer:
 
     def render(
         self, 
-        gaussians: Float[Tensor, "B N F"], 
-        c2w: Float[Tensor, "B V 4 4"],
-        fovx: Float[Tensor, "B V"] = None,
-        fovy: Float[Tensor, "B V"] = None,
-        rays_o: Float[Tensor, "B V H W 3"] = None,
-        rays_d: Float[Tensor, "B V H W 3"] = None,
-        bg_color: Float[Tensor, "... 3"] = None, 
+        gaussians, 
+        c2w,
+        fovx = None,
+        fovy = None,
+        rays_o = None,
+        rays_d = None,
+        bg_color = None, 
         scale_modifier: float = 1.,
     ):
         # gaussians: [B, N, 14]
@@ -203,8 +360,11 @@ class GaussianRenderer:
 
         # loop of loop...
         images = []
-        alphas = []
+        rend_dists = []
+        rend_normals = []
+        depth_normals = []
         depths = []
+        acc_maps = []
         for b in range(B):
 
             means3D = gaussians[b, :, 0:3].contiguous().float()
@@ -212,12 +372,12 @@ class GaussianRenderer:
             opacity = gaussians[b, :, 6:7].contiguous().float()
             rotations = gaussians[b, :, 7:11].contiguous().float()
             scales = gaussians[b, :, 11:].contiguous().float()
-            means2D = torch.zeros_like(means3D, dtype=means3D.dtype, device=device)
 
             for v in range(V):
                 fovx_ = fovx[b, v].clone()
                 fovy_ = fovy[b, v].clone()
                 c2w_ = c2w[b, v].clone()
+                rays_d_ = rays_d[b, v].clone()
                 w2c, proj, cam_p = get_cam_info_gaussian(
                     c2w=c2w_, fovx=fovx_, fovy=fovy_, znear=self.znear, zfar=self.zfar
                 )
@@ -226,21 +386,29 @@ class GaussianRenderer:
                 tan_half_fovy = torch.tan(fovy_ * 0.5)
 
                 if self.renderer_type == "vanilla":
-                    raster_settings = GaussianRasterizationSettings(
+                    self.gs_render.set_bg_color(torch.tensor([0., 0., 0.], device=c2w.device))
+                    cam = MiniCam(
                         image_height=self.resolution[0],
                         image_width=self.resolution[1],
-                        tanfovx=tan_half_fovx,
-                        tanfovy=tan_half_fovy,
-                        bg=self.bg_color if bg_color is None else bg_color,
-                        scale_modifier=scale_modifier,
-                        viewmatrix=w2c,
-                        projmatrix=proj,
-                        sh_degree=0,
-                        campos=cam_p,
-                        prefiltered=False,
-                        debug=False,
+                        tan_half_fovx=tan_half_fovx, 
+                        tan_half_fovy=tan_half_fovy, 
+                        world_view_transform=w2c, 
+                        full_proj_transform=proj, 
+                        camera_center=cam_p, 
+                        device=c2w.device
                     )
-                    rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+
+                    frame = self.gs_render.render_img(cam,
+                                                      rays_d_, 
+                                                      means3D, 
+                                                      None, 
+                                                      rgbs, 
+                                                      opacity, 
+                                                      scales, 
+                                                      rotations, 
+                                                      c2w.device
+                                                      )
+
                 elif self.renderer_type == "panorama":
                     raster_settings = GaussianRasterizationSettings(
                         image_height=self.resolution[0],
@@ -260,49 +428,35 @@ class GaussianRenderer:
                 else:
                     raise NotImplementedError
 
-                # Rasterize visible Gaussians to image, obtain their radii (on screen).
-                if self.renderer_type == "vanilla":
-                    rendered_image, radii, rendered_depth, rendered_alpha = rasterizer(
-                        means3D=means3D,
-                        means2D=means2D,
-                        shs=None,
-                        colors_precomp=rgbs,
-                        opacities=opacity,
-                        scales=scales,
-                        rotations=rotations,
-                        cov3D_precomp=None,
-                    )
-                    rendered_normal = None
-                elif self.renderer_type == "panorama":
-                    rendered_image, feature_map, confidence_map, mask, rendered_depth, rendered_alpha = rasterizer(
-                        means3D=means3D,
-                        means2D=means2D,
-                        shs=None,
-                        colors_precomp=rgbs,
-                        opacities=opacity,
-                        scales=scales,
-                        rotations=rotations,
-                        cov3D_precomp=None,
-                    )
-                else:
-                    raise NotImplementedError
+                images.append(frame['image'])
+                rend_dists.append(frame['rend_dist'])
+                rend_normals.append(frame['rend_normal'])
+                depth_normals.append(frame['depth_normal'])
+                depths.append(frame['depth'])
+                acc_maps.append(frame['acc_map'])
 
-                rendered_image = torch.clamp(rendered_image, min=0.0, max=1.0)
-                images.append(rendered_image)
-                alphas.append(rendered_depth)
-                depths.append(rendered_depth)
         if self.renderer_type == "panorama":
             images = torch.stack(images, dim=0).view(B, V, 3, self.resolution[0], self.resolution[1])
-            alphas = torch.stack(alphas, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
-            depths = torch.stack(depths, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
+            depths = torch.stack(depths, dim=0).view(B, V, 3, self.resolution[0], self.resolution[1])
+            rend_dists = torch.stack(rend_dists, dim=0).view(B, V, self.resolution[0], self.resolution[1])
+            rend_normals = torch.stack(rend_normals, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
+            depth_normals = torch.stack(depth_normals, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
+            acc_maps = torch.stack(acc_maps, dim=0).view(B, V, 1, self.resolution[0], self.resolution[1])
         else:
             images = self.C2E(torch.stack(images, dim=0)).view(B, -1, 3, self.resolution[0] * 2, self.resolution[1] * 4)
-            alphas = self.C2E(torch.stack(alphas, dim=0)).view(B, -1, 1, self.resolution[0] * 2, self.resolution[1] * 4)
             depths = self.C2E(torch.stack(depths, dim=0)).view(B, -1, 1, self.resolution[0] * 2, self.resolution[1] * 4)
+            rend_dists = self.C2E(torch.stack(rend_dists, dim=0)).view(B, -1, 1, self.resolution[0] * 2, self.resolution[1] * 4)
+            rend_normals = self.C2E(torch.stack(rend_normals, dim=0)).view(B, -1, 3, self.resolution[0] * 2, self.resolution[1] * 4)
+            depth_normals = self.C2E(torch.stack(depth_normals, dim=0)).view(B, -1, 3, self.resolution[0] * 2, self.resolution[1] * 4)
+            acc_maps = self.C2E(torch.stack(acc_maps, dim=0)).view(B, -1, 1, self.resolution[0] * 2, self.resolution[1] * 4)
+
         return {
             "image": images, # [B, V, 3, H, W]
-            "alpha": alphas, # [B, V, 1, H, W]
-            "depth": depths
+            "depth": depths, # [B, V, 1, H, W]
+            "rend_dist": rend_dists, # [B, V, 1, H, W]
+            "rend_normal": rend_normals, # [B, V, 3, H, W]
+            "depth_normal": depth_normals, # [B, V, 3, H, W]
+            "acc_map": acc_maps, # [B, V, 1, H, W] 
         }
 
 
@@ -399,8 +553,8 @@ class GaussianRenderer:
     
     def render_orthographic(
         self, 
-        gaussians: Float[Tensor, "B N F"],
-        bg_color: Float[Tensor, "... 3"] = None, 
+        gaussians,
+        bg_color = None, 
         scale_modifier: float = 1.,
         width: float = 30,
         height: float = 30,
@@ -463,7 +617,7 @@ class GaussianRenderer:
             tan_half_fovy = torch.tan(fovy * 0.5)
 
             if self.renderer_type == "vanilla":
-                raster_settings = GaussianRasterizationSettings(
+                raster_settings = ThreeDGaussianRasterizationSettings(
                     image_height=bev_width,
                     image_width=bev_width,
                     tanfovx=tan_half_fovx,
@@ -477,9 +631,9 @@ class GaussianRenderer:
                     prefiltered=False,
                     debug=False,
                 )
-                rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+                rasterizer = ThreeDGaussianRasterizer(raster_settings=raster_settings)
             elif self.renderer_type == "panorama":
-                raster_settings = GaussianRasterizationSettings(
+                raster_settings = ThreeDGaussianRasterizationSettings(
                     image_height=bev_width,
                     image_width=bev_width,
                     tanfovx=tan_half_fovx,
@@ -493,7 +647,7 @@ class GaussianRenderer:
                     prefiltered=False,  # This matches the original usage.
                     debug=False,
                 )
-                rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+                rasterizer = ThreeDGaussianRasterizer(raster_settings=raster_settings)
             else:
                 raise NotImplementedError
 
@@ -509,7 +663,6 @@ class GaussianRenderer:
                     rotations=rotations,
                     cov3D_precomp=None,
                 )
-                rendered_normal = None
             elif self.renderer_type == "panorama":
                 rendered_image, feature_map, confidence_map, mask, rendered_depth, rendered_alpha = rasterizer(
                     means3D=means3D,
