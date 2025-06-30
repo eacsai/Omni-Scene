@@ -87,23 +87,28 @@ class OmniGaussianCylinderPixelVolume(BaseModule):
         self.E2C = Equirec2Cube(equ_h=160, equ_w=320, cube_length=self.camera_args['resolution'][0])
         self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
 
-    def extract_img_feat(self, img, status="train"):
+    def extract_img_feat(self, img, depths_in, confs_in, pluckers, status="train"):
         """Extract features of images."""
-        B, N, C, H, W = img.size()
-        img = img.view(B * N, C, H, W)
+        # B, N, C, H, W = img.size()
+        # img = img.view(B * N, C, H, W)
 
         if self.use_checkpoint and status != "test":
             img_feats = torch.utils.checkpoint.checkpoint(
-                            self.backbone, img, use_reentrant=False)
+                            self.backbone, 
+                            img,
+                            depths_in,
+                            confs_in,
+                            pluckers, 
+                            use_reentrant=False)
         else:
-            img_feats = self.backbone(img)
-        img_feats = self.neck(img_feats) # BV, C, H, W
-        img_feats_reshaped = []
-        for img_feat in img_feats:
-            _, C, H, W = img_feat.size()
-            # single_features_to_RGB(img_feat)
-            img_feats_reshaped.append(img_feat.view(B, N, C, H, W))
-        return img_feats_reshaped
+            img_feats = self.backbone(img,depths_in,confs_in,pluckers)
+        # img_feats = self.neck(img_feats) # BV, C, H, W
+        # img_feats_reshaped = []
+        # for img_feat in img_feats:
+        #     _, C, H, W = img_feat.size()
+        #     # single_features_to_RGB(img_feat)
+        #     img_feats_reshaped.append(img_feat.view(B, N, C, H, W))
+        return img_feats
 
     @property
     def device(self):
@@ -188,11 +193,15 @@ class OmniGaussianCylinderPixelVolume(BaseModule):
         # test_img.save('input_img.png')
 
         bs = img.shape[0]
-        img_feats = self.extract_img_feat(img=img)
+        img_feats = self.extract_img_feat(img=img,
+                                          depths_in=data_dict["depths"], 
+                                          confs_in=data_dict["confs"], 
+                                          pluckers=data_dict["pluckers"]
+                                        )
 
         # pixel-gs prediction
         gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
+                rearrange(img_feats, "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"])
 
@@ -312,11 +321,15 @@ class OmniGaussianCylinderPixelVolume(BaseModule):
         data_dict = self.get_data(batch)
         img = data_dict["imgs"]
         bs = img.shape[0]
-        img_feats = self.extract_img_feat(img=img, status="test")
+        img_feats = self.extract_img_feat(img=img,
+                                          depths_in=data_dict["depths"], 
+                                          confs_in=data_dict["confs"], 
+                                          pluckers=data_dict["pluckers"]
+                                        )
 
         # pixel-gs prediction
         gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
+                rearrange(img_feats, "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"], status='test')
             

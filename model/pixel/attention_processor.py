@@ -9,11 +9,7 @@ from diffusers.models.attention_processor import Attention
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils import USE_PEFT_BACKEND
 
-if is_xformers_available():
-    import xformers
-    import xformers.ops
-else:
-    xformers = None
+xformers = None
 
     
 class KVCompressAttnProcessor(nn.Module):

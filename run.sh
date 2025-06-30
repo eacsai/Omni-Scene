@@ -40,13 +40,17 @@ python train_mp3d_cylinder.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder.py \
     --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_18000
 
-python train_mp3d_cylinder_double.py \
-    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double.py \
-    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double
+python train_mp3d_cylinder_double_volume.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_all.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all
 
 python train_mp3d_cylinder_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_pixel.py \
-    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_corssatten
+
+python train_mp3d_cylinder_double_volume.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_volume.py \
+    --work-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume
 
 python train_mp3d_cylinder_volume.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_volume.py \
@@ -136,9 +140,14 @@ python evaluate_mp3d_double.py \
     --load-from "checkpoint-27000"
 
 python evaluate_mp3d_double.py \
+    --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_all.py \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all" \
+    --load-from "checkpoint-15000"
+
+python evaluate_mp3d_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_pixel.py \
-    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel" \
-    --load-from "checkpoint-3000"
+    --output-dir /data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_corssatten \
+    --load-from "checkpoint-15000"
 
 python evaluate_mp3d_double.py \
     --py-config configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_volume.py \

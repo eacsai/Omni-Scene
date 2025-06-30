@@ -103,7 +103,6 @@ class PixelGaussian(BaseModule):
 
         gs_channels = 1 + 1 + 3 + 4 + 3 # offset, opacity, scale, rotation, rgb
         self.gs_channels = gs_channels
-        self.feature_norm = nn.GroupNorm(num_channels=out_embed_dims[0], num_groups=32, eps=1e-6)
         self.to_gaussians = nn.Sequential(
             nn.GELU(),
             nn.Conv2d(out_embed_dims[0], gs_channels, 1),
@@ -137,55 +136,9 @@ class PixelGaussian(BaseModule):
     def forward(self, img_feats, depths_in, confs_in, pluckers, origins, directions, status="train"):
         """Forward training function."""
         # upsample 4x downsampled img features to original size
-        img_feats = self.upsampler(img_feats)
-        bs = origins.shape[0]
-        img_feats = rearrange(img_feats, "(b v) c h w -> b v h w c", b=bs, v=self.num_cams)
-
-        pluckers = rearrange(pluckers, "b v c h w -> b v h w c")
-        plucker_embeds = self.plucker_to_embed(pluckers)
-        img_feats = img_feats + self.cams_embeds[None, :, None, None] + plucker_embeds
-        img_feats = rearrange(img_feats, "b v h w c -> (b v) c h w")
-
-        # rearrange pseudo depths and confs
-        depths_in = rearrange(depths_in, "b v c h w -> (b v) c h w")
-        confs_in = rearrange(confs_in, "b v c h w -> (b v) c h w")
-        depth_scale = 2.0 # 20.0 outdoor
-        img_feats = torch.cat([img_feats, depths_in / depth_scale, confs_in], dim=1)
-
-        # downsample
-        sample = img_feats
-        down_block_res_samples = (sample,)
-        for block_id, down_block in enumerate(self.down_blocks):
-            if self.use_checkpoint and status != "test":
-                sample, res_samples = torch.utils.checkpoint.checkpoint(
-                    down_block, sample, use_reentrant=False)
-            else:
-                sample, res_samples = down_block(sample)
-            down_block_res_samples += res_samples
-        
-        # middile
-        sample = self.mid_block(sample)
-
-        # upsample
-        for block_id, up_block in enumerate(self.up_blocks):
-            res_samples = down_block_res_samples[-len(up_block.resnets):]
-            down_block_res_samples = down_block_res_samples[:-len(up_block.resnets)]
-            if self.use_checkpoint and status != "test":
-                input_vars = (sample, res_samples)
-                sample = torch.utils.checkpoint.checkpoint(
-                    up_block, *input_vars, use_reentrant=False
-                )
-            else:
-                sample = up_block(sample, res_samples)
-       
-        # rearrange features
-        features = self.feature_norm(sample)
         bs = origins.shape[0]
 
-        # post-process
-        _, _, h, w = features.shape
-
-        gaussians = self.to_gaussians(features)
+        gaussians = self.to_gaussians(img_feats)
         gaussians = rearrange(gaussians, "(b v) (n c) h w -> b (v h w n) c",
                               b=bs, v=self.num_cams, n=1, c=self.gs_channels)
         offsets = gaussians[..., :1]
@@ -194,7 +147,7 @@ class PixelGaussian(BaseModule):
         rotations = self.rot_act(gaussians[..., 5:9])
         rgbs = self.rgb_act(gaussians[..., 9:12])
 
-        depths_in = rearrange(depths_in, "(b v) c h w-> b (v h w) c", b=bs, v=self.num_cams)
+        depths_in = rearrange(depths_in, "b v c h w-> b (v h w) c", b=bs, v=self.num_cams)
 
         origins = rearrange(origins, "b v h w c -> b (v h w) c")
         origins = origins.unsqueeze(-2)
@@ -206,7 +159,7 @@ class PixelGaussian(BaseModule):
         # means = means + offsets
 
         gaussians = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
-        features = rearrange(features, "(b v) c h w -> b (v h w) c", b=bs, v=self.num_cams)
+        features = rearrange(img_feats, "(b v) c h w -> b (v h w) c", b=bs, v=self.num_cams)
         features = features.unsqueeze(2) # b v*h*w n c
         features = rearrange(features, "b r n c -> b (r n) c")
         
