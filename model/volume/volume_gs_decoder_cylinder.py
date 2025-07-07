@@ -6,10 +6,39 @@ from sample_anchors import sample_concentrating_sphere, project_onto_planes
 import math
 from vis_feat import single_features_to_RGB
 import numpy as np
+import matplotlib.pyplot as plt
 
 def sigmoid_scaling(scaling:torch.Tensor, lower_bound=0.005, upper_bound=0.02):
     sig = torch.sigmoid(scaling)
     return lower_bound * (1 - sig) + upper_bound * sig
+
+def vis_sample_points(pixel_locs, depths, W, H):    # 4. 准备绘图数据 (将PyTorch张量转为NumPy数组)
+    u = pixel_locs[:, 0].detach().cpu().numpy()
+    v = pixel_locs[:, 1].detach().cpu().numpy()
+    d = depths.detach().cpu().numpy().flatten()
+
+    # 5. 使用 matplotlib 进行可视化
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    scatter = ax.scatter(u, v, c=d, cmap='viridis', s=5, alpha=0.8)
+
+    # 添加颜色条
+    cbar = fig.colorbar(scatter, ax=ax)
+    cbar.set_label('深度 (Depth)')
+
+    # 设置坐标轴和标题
+    ax.set_title('球形投影可视化 (Spherical Projection Visualization)')
+    ax.set_xlabel('u 坐标 (来自方位角 Theta)')
+    ax.set_ylabel('v 坐标 (来自俯仰角 Phi)')
+    ax.set_xlim(0, W)
+    # 反转y轴，使(0,0)在左上角，符合图像坐标习惯
+    ax.set_ylim(H, 0) 
+    ax.set_aspect('equal', adjustable='box') # 保持图像比例
+    ax.grid(True, linestyle='--', alpha=0.3)
+
+    plt.savefig('spherical_projection_visualization.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
 @MODELS.register_module()
 class VolumeGaussianDecoderCylinder(BaseModule):
@@ -47,7 +76,7 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         #     self.offset_max = [1.0] * 3 # meters
         # else:
         #     self.offset_max = offset_max
-        self.offset_max = [pc_range[3] - pc_range[0], 2*torch.pi/tpv_theta, (pc_range[5] - pc_range[2])/tpv_z] # r, theta, z
+        self.offset_max = [(pc_range[3] - pc_range[0])/tpv_r, 2*torch.pi/tpv_theta, (pc_range[5] - pc_range[2])/tpv_z] # r, theta, z
         #self.scale_act = lambda x: sigmoid_scaling(x, lower_bound=0.005, upper_bound=0.02)
         # if scale_max is None:
         #     self.scale_max = [1.0] * 3 # meters
@@ -58,7 +87,13 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = lambda x: torch.sigmoid(x)
-
+        self.gaussian_to_color = nn.Sequential(
+            nn.Linear(72, 128, bias=True),
+            nn.LeakyReLU(),
+            nn.Linear(128, 128, bias=True),
+            nn.LeakyReLU(),
+            nn.Linear(128, 3, bias=True),
+        )
 
         # obtain anchor points for gaussians        
         # r = torch.linspace(0.5, self.tpv_z-0.5, self.tpv_z, device='cuda')
@@ -73,7 +108,21 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         self.register_buffer('scale_cylinder', scale_cylinder)
         # self.register_buffer('anchors_coordinates', anchors_coordinates[combined_mask])
 
-    
+    def normalize(self, pixel_locations, h, w):
+        resize_factor = torch.tensor([w-1., h-1.]).to(pixel_locations.device)[None, None, None, :]
+        normalized_pixel_locations = 2 * pixel_locations / resize_factor - 1.  # [n_views, n_points, 2]
+        return normalized_pixel_locations
+
+    def generate_window_grid(self, h_min, h_max, w_min, w_max, len_h, len_w, device=None):
+        assert device is not None
+
+        x, y = torch.meshgrid([torch.linspace(w_min, w_max, len_w, device=device),
+                            torch.linspace(h_min, h_max, len_h, device=device)],
+                            )
+        grid = torch.stack((x, y), -1).transpose(0, 1).float()  # [H, W, 2]
+
+        return grid
+
     @staticmethod
     def get_scale_cylinder(
         theta_res: int, 
@@ -217,7 +266,97 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         # ref_3d[..., 2:3] = ref_3d[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
         return ref_3d, scale_3d
 
-    def forward(self, tpv_list, debug=False):
+    def get_panorama_color(
+            self,
+            xyz: torch.Tensor,  # [bs, num_points, 3]
+            source_imgs: torch.Tensor, #[bs, view, c, h, w]
+            source_depths: torch.Tensor, # [bs, view, h, w]
+            img_metas: list, # list of dicts, each dict contains 'lidar2img' key
+            local_radius: int = 1,
+    ):
+        eps = 1e-5
+        b,v,_,h,w = source_imgs.shape
+        # init lidar2img
+        source_cams = []
+        for img_meta in img_metas:
+            source_cams.append(img_meta["lidar2img"])
+        source_cams = torch.stack(source_cams, dim=0) # [bs, view, 4, 4]
+
+        local_h = 2 * local_radius + 1
+        local_w = 2 * local_radius + 1
+
+        window_grid = self.generate_window_grid(-local_radius, local_radius,
+                                                -local_radius, local_radius,
+                                                local_h, local_w, device=xyz.device)  # [2R+1, 2R+1, 2]
+        window_grid = window_grid.reshape(-1, 2).repeat(b, v, 1, 1)
+
+        ones = torch.ones_like(xyz[..., :1], device=xyz.device, dtype=xyz.dtype)
+        reference_points_homogeneous = torch.cat((xyz, ones), dim=-1) # [bs, num_points, 4]
+        P_cam_homogeneous = torch.matmul(source_cams[:,:,None,:,:], reference_points_homogeneous[:,None,:,:,None]) # [bs, view, num_points, 4, 1]
+        P_cam_homogeneous = P_cam_homogeneous.squeeze(-1) # [bs, view, num_points, 4]        
+        w_prime = P_cam_homogeneous[..., 3:]
+        reference_points = P_cam_homogeneous[..., :3] / (w_prime + eps) # [bs, view, num_points, 3]
+        x = reference_points[...,0:1]
+        y = reference_points[...,1:2]
+        z = reference_points[...,2:3]
+
+        project_depth = torch.sqrt(x**2 + y**2 + z**2 + eps).squeeze(-1) # [bs, view, num_points]
+        theta = w * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) # [bs, view, num_points, 1]
+        phi = h * (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi # [bs, view, num_points, 1]
+        pixel_locations = torch.cat((theta, phi), dim=-1) # [bs, view, num_points, 2]
+        # vis_sample_points(pixel_locations[0,0], project_depth[0,0], W=w, H=h)
+        mask_in_front = (
+              (pixel_locations[..., 1] > 0.0)
+            & (pixel_locations[..., 1] < h)
+            & (pixel_locations[..., 0] < w)
+            & (pixel_locations[..., 0] > 0.0)
+            & (project_depth > 0.0)
+        ) # [bs, view, num_points]
+
+        depths_sampled = F.grid_sample(
+            source_depths.view(b*v, 1, h, w), 
+            self.normalize(pixel_locations.view(b*v, 1, -1, 2), h, w), 
+            align_corners=False
+        )
+
+        depths_sampled = depths_sampled.squeeze().view(b, v, -1) # [bs, view, num_points]
+        retrived_depth = depths_sampled.masked_fill(mask_in_front==0, 0)
+        projected_depth = project_depth*mask_in_front
+        
+        visibility_map = projected_depth - retrived_depth
+        visibility_map = visibility_map.unsqueeze(-1).repeat(1, 1, 1, local_h*local_w).contiguous() # [bs, view, num_points, local_h*local_w]
+        visibility_map = visibility_map.permute(0,2,1,3).unsqueeze(-1) # [bs, num_points, view, local_h*local_w, 1]
+
+        # bradcast pixel locations and mask_in_front to match the shape of window grid
+        pixel_locations = pixel_locations.unsqueeze(dim=3) + window_grid.unsqueeze(dim=2) # [bs, view, num_points, local_h*local_w, 2]
+        pixel_locations = pixel_locations.view(b, v, -1, 2) # [bs, view, num_points*local_h*local_w, 2]
+        normalized_pixel_locations = self.normalize(pixel_locations, h, w) # [bs, view, num_points*local_h*local_w, 2]
+        normalized_pixel_locations = normalized_pixel_locations.unsqueeze(2) # [bs, view, 1, num_points*local_h*local_w, 2]
+        mask_in_front = mask_in_front.unsqueeze(dim=3).repeat(1, 1, 1, local_h*local_w).contiguous() # [bs, view, num_points, local_h*local_w]
+        mask_in_front = mask_in_front.view(b, v, -1) # [bs, view, num_points*local_h*local_w]
+
+        rgbs_sampled = F.grid_sample(source_imgs.view(b*v,3,h,w), 
+                                     normalized_pixel_locations.view(b*v,1,-1,2), 
+                                     align_corners=False
+        ) # [bs*v, 3, num_points*local_h*local_w]
+        
+        rgb_sampled = rgbs_sampled.view(b, v, 3, -1) # [bs, view, 3, num_points*local_h*local_w]
+        rgb_sampled = rgb_sampled.permute(0, 1, 3, 2) # [bs, view, num_points*local_h*local_w, 3]
+        rgb = rgb_sampled.masked_fill(mask_in_front.unsqueeze(-1)==0, 0) # [bs, view, num_points*local_h*local_w, 3]
+        rgb = rgb.view(b,v,-1,local_h*local_w,3).permute(0,2,1,3,4) # [bs, num_points, view, local_h*local_w, 3]
+
+        # cam_pos = torch.inverse(source_cams)[..., :3, 3] # [bs, view, 3]
+        # ob_view = xyz.unsqueeze(1) - cam_pos.unsqueeze(2) # [bs, view, num_points, 3]
+        # ob_view = ob_view.permute(0, 2, 1, 3) # [bs, num_points, view, 3]
+        # ob_dist = ob_view.norm(dim=-1, keepdim=True)
+        # ob_view = ob_view / ob_dist
+        # ob_view = ob_view.unsqueeze(-2).repeat(1, 1, 1, local_h*local_w, 1) # [bs, num_points, view, local_h*local_w, 3]
+        sampled_feat = torch.concat([rgb, visibility_map],dim=-1).view(b, -1, v*local_h*local_w*4) # [bs, num_points, view*local_h*local_w*4]
+        color = self.gaussian_to_color(sampled_feat) # [bs, num_points, 3]
+
+        return color
+
+    def forward(self, tpv_list, img_color, img_depth, img_metas, debug=False):
         """
         tpv_list[0]: bs, h*w, c
         tpv_list[1]: bs, z*h, c
@@ -277,9 +416,15 @@ class VolumeGaussianDecoderCylinder(BaseModule):
             self.pc_range, bs=bs, device=gaussians.device
         )
         # gs_positions = torch.cat([gs_offsets_x, gs_offsets_y, gs_offsets_z], dim=-1) + self.gs_anchors[:, :, :, :, None, :]
-        
-        x = torch.cat([gs_positions, scale_3d, gaussians[..., 6:]], dim=-1)
-        rgbs = self.rgb_act(x[..., 6:9])
+        color = self.get_panorama_color(
+            gs_positions.view(bs, -1, 3),
+            img_color,
+            img_depth,
+            img_metas
+        )
+        rgbs = color.view(bs, w, h, z, self.gpv, 3) # bs, w, h, z, gpv, 3
+        x = torch.cat([gs_positions, scale_3d, rgbs, gaussians[..., 9:]], dim=-1)
+        # rgbs = self.rgb_act(x[..., 6:9])
         opacity = self.opacity_act(x[..., 9:10])
         rotation = self.rot_act(x[..., 10:14])
 

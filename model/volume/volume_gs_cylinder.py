@@ -39,7 +39,7 @@ class VolumeGaussianCylinder(BaseModule):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, img_feats, candidate_gaussians, candidate_feats, img_metas=None, status="train"):
+    def forward(self, img_feats, candidate_gaussians, candidate_feats, img_color, img_depth, img_metas, status="train"):
         """Forward training function.
         """
         if candidate_gaussians is not None and candidate_feats is not None:
@@ -125,10 +125,20 @@ class VolumeGaussianCylinder(BaseModule):
             outs = torch.utils.checkpoint.checkpoint(
                 self.encoder, *input_vars_enc, use_reentrant=False
             )
-            gaussians = torch.utils.checkpoint.checkpoint(self.gs_decoder, outs, use_reentrant=False)
+            gaussians = torch.utils.checkpoint.checkpoint(self.gs_decoder, 
+                                                          outs,
+                                                          img_color, 
+                                                          img_depth, 
+                                                          img_metas, 
+                                                          use_reentrant=False,
+                                                          )
         else:
             outs = self.encoder(img_feats, project_feats, img_metas)
-            gaussians = self.gs_decoder(outs)
+            gaussians = self.gs_decoder(outs, 
+                                        img_color, 
+                                        img_depth, 
+                                        img_metas,
+                                        )
         bs = gaussians.shape[0]
         n_feature = gaussians.shape[-1]
         gaussians = gaussians.reshape(bs, -1, n_feature)

@@ -8,7 +8,7 @@ _base_ = [
 exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume"
 output_dir = "/data/qiwei/nips25/workdirs"
 
-lr = 1e-4
+lr = 1e-4 #1e-4
 grad_max_norm = 1.0
 print_freq = 100
 save_freq = 3000
@@ -22,7 +22,8 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_corssatten/checkpoint-36000"
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_new/checkpoint-36000/model.safetensors"
+# resume_from = False
 report_to = "tensorboard"
 
 volume_only = False
@@ -33,9 +34,9 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-near_point_cloud_range = [0.0, 0.0, -4.0, 8.0, 6.28, 4.0] # r, phi, z
-far_point_cloud_range = [4.0, 0.0, -4.0, 8.0, 6.28, 4.0]
-point_cloud_range = [0.0, 0.0, -4.0, 12.0, 6.28, 4.0] # r, phi, z
+near_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
+far_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0]
+point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1

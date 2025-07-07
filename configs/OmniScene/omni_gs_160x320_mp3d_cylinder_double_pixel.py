@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_cylinder_double_pixel"
+exp_name = "omni_gs_160x320_mp3d_cylinder_double_pixel_new"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4
@@ -33,9 +33,9 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-near_point_cloud_range = [0.0, 0.0, -3.0, 8.0, 6.28, 3.0] # r, phi, z
-far_point_cloud_range = [4.0, 0.0, -3.0, 8.0, 6.28, 3.0]
-point_cloud_range = [0.0, 0.0, -3.0, 12.0, 6.28, 3.0] # r, phi, z
+near_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
+far_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0]
+point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1
@@ -81,10 +81,10 @@ loss_args = dict(
     weight_recon=1.0,
     weight_perceptual=0.05,
     weight_depth_abs=1.0,
-    weight_recon_vol=1.0,
-    weight_perceptual_vol=0.05,
-    weight_depth_abs_vol=1.0,
-    weight_volume_loss=0.1 #0.1
+    weight_recon_vol=0,
+    weight_perceptual_vol=0,
+    weight_depth_abs_vol=0,
+    weight_volume_loss=0 #0.1
 )
 
 pc_range = point_cloud_range

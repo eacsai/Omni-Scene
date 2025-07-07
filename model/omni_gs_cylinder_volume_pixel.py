@@ -230,6 +230,8 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
                 [img_feats],
                 near_gaussians_pixel_mask,
                 near_gaussians_feat_mask,
+                data_dict["imgs"],
+                data_dict["depths"],
                 data_dict["img_metas"]
         )
 
@@ -314,11 +316,11 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
 
 
         test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_volume_pixel.png')
+        test_img.save('render_volume_mp3d_all.png')
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_volume_pixel.png')
+        test_img.save('render_pixel_mp3d_all.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_volume_pixel.png')
+        test_img.save('render_bev_mp3d_all.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
@@ -397,9 +399,10 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
             set_loss("depth_abs_vol", split, depth_abs_loss_vol, self.loss_args.weight_depth_abs_vol)        
         # ====================Volume loss ===================== #
         if self.loss_args.weight_volume_loss > 0 and iter < iter_end:
-            volume_loss = gaussians_volume[...,6:7].mean()
+            volume_loss = (- render_pkg_volume["alpha"] * torch.log(render_pkg_volume["alpha"] + 1e-8)
+                           - (1 - render_pkg_volume["alpha"]) * torch.log(1 - render_pkg_volume["alpha"] + 1e-8)).mean()
             loss = loss + self.loss_args.weight_volume_loss * volume_loss
-            set_loss("volume", split, volume_loss, self.loss_args.weight_volume_loss)        
+            set_loss("volume", split, volume_loss, self.loss_args.weight_volume_loss)          
 
         return loss, loss_terms, render_pkg_fuse, render_pkg_pixel, render_pkg_volume, gaussians_all, gaussians_pixel, gaussians_volume, data_dict
     
@@ -454,7 +457,10 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
                     [img_feats],
                     near_gaussians_pixel_mask,
                     near_gaussians_feat_mask,
-                    data_dict["img_metas"], status='test')  
+                    data_dict["imgs"],
+                    data_dict["depths"],
+                    data_dict["img_metas"],
+                    status='test')  
             
         gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
         # gaussians_all = gaussians_volume

@@ -274,7 +274,7 @@ class GaussianRenderer:
                     )
                     rendered_normal = None
                 elif self.renderer_type == "panorama":
-                    rendered_image, feature_map, confidence_map, mask, rendered_depth, rendered_alpha = rasterizer(
+                    rendered_image, feature_map, confidence_map, rendered_alpha, rendered_depth, rendered_radii = rasterizer(
                         means3D=means3D,
                         means2D=means2D,
                         shs=None,
@@ -289,7 +289,7 @@ class GaussianRenderer:
 
                 rendered_image = torch.clamp(rendered_image, min=0.0, max=1.0)
                 images.append(rendered_image)
-                alphas.append(rendered_depth)
+                alphas.append(rendered_alpha)
                 depths.append(rendered_depth)
         if self.renderer_type == "panorama":
             images = torch.stack(images, dim=0).view(B, V, 3, self.resolution[0], self.resolution[1])
