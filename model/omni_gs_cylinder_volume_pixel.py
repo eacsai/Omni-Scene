@@ -213,16 +213,11 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
         cylinder_r = torch.sqrt(gaussians_pixel[..., 0]**2 + gaussians_pixel[..., 2]**2 + 1e-5)
 
         # Cylinder
-        for b in range(bs):
-            mask_pixel_i = (cylinder_r[b] <= self.near_point_cloud_range[3]) & \
-                            (gaussians_pixel[b, :, 1] >= self.near_point_cloud_range[2]) & \
-                            (gaussians_pixel[b, :, 1] <= self.near_point_cloud_range[5])
-            # fix tab
-            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-
-            near_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            near_gaussians_feat_mask.append(gaussians_feat_mask_i)
+        mask_pixel = (cylinder_r <= self.near_point_cloud_range[3]) & \
+                    (gaussians_pixel[..., 1] >= self.near_point_cloud_range[2]) & \
+                    (gaussians_pixel[..., 1] <= self.near_point_cloud_range[5])
+        near_gaussians_pixel_mask = [gaussians_pixel[b][mask_pixel[b]] for b in range(bs)]
+        near_gaussians_feat_mask = [gaussians_feat[b][mask_pixel[b]] for b in range(bs)]
 
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         
@@ -316,11 +311,15 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
 
 
         test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_all.png')
+        test_img.save('render_fuse_mp3d_all.png')
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
         test_img.save('render_pixel_mp3d_all.png')
+        test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
+        test_img.save('render_volume_mp3d_all.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
         test_img.save('render_bev_mp3d_all.png')
+        test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
+        test_img.save('render_gt_mp3d_all.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
@@ -397,6 +396,7 @@ class OmniGaussianCylinderVolumePixel(BaseModule):
             depth_abs_loss_vol = depth_abs_loss_vol.mean()
             loss = loss + self.loss_args.weight_depth_abs_vol * depth_abs_loss_vol
             set_loss("depth_abs_vol", split, depth_abs_loss_vol, self.loss_args.weight_depth_abs_vol)        
+        
         # ====================Volume loss ===================== #
         if self.loss_args.weight_volume_loss > 0 and iter < iter_end:
             volume_loss = (- render_pkg_volume["alpha"] * torch.log(render_pkg_volume["alpha"] + 1e-8)

@@ -20,7 +20,7 @@ from .utils.benchmarker import Benchmarker
 from .utils.interpolation import interpolate_extrinsics
 
 from pano2cube import Equirec2Cube, Cube2Equirec
-from vis_feat import single_features_to_RGB
+from vis_feat import single_features_to_RGB, reduce_gaussian_features_to_rgb, save_point_cloud, point_features_to_rgb_colormap
 import torchvision.transforms as transforms
 to_pil_image = transforms.ToPILImage()
 import matplotlib.cm as cm
@@ -332,7 +332,12 @@ class OmniGaussianCylinderPixelVolume(BaseModule):
                 rearrange(img_feats, "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"], status='test')
-            
+
+        # vis feature points
+        # points_xyz = gaussians_pixel[..., :3][0].detach().cpu().numpy()
+        # points_rgb = point_features_to_rgb_colormap(gaussians_feat, cmap_name='rainbow')[0]
+        # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
+
         gaussians_all = gaussians_pixel
         bs = gaussians_all.shape[0]
         render_c2w = data_dict["output_c2ws"]
@@ -353,8 +358,8 @@ class OmniGaussianCylinderPixelVolume(BaseModule):
         output_depths = render_pkg_fuse["depth"].squeeze(2) # b v h w
 
         target_imgs = data_dict["output_imgs"] # b v 3 h w
-        target_depths = data_dict["output_depths"] # b v h w
-        target_depths_m = data_dict["output_depths_m"] # b v h w
+        target_depths = data_dict["output_depths"]# b v 1 h w
+        target_depths_m = data_dict["output_depths_m"] # b 1 v h w
 
         preds = {"img": output_imgs, "depth": output_depths, "gaussian": gaussians_all}
         gts = {"img": target_imgs, "depth": target_depths, "depth_m": target_depths_m}

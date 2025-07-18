@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume"
+exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume_z3"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4 #1e-4
@@ -34,9 +34,9 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-near_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
-far_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0]
-point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
+near_point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0] # r, phi, z
+far_point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0]
+point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1

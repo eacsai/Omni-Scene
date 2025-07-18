@@ -228,16 +228,11 @@ class OmniGaussianCylinderVolume(BaseModule):
             cylinder_r = torch.sqrt(gaussians_pixel[..., 0]**2 + gaussians_pixel[..., 2]**2 + 1e-5)
 
             # Cylinder
-            for b in range(bs):
-                mask_pixel_i = (cylinder_r[b] <= self.near_point_cloud_range[3]) & \
-                                (gaussians_pixel[b, :, 1] >= self.near_point_cloud_range[2]) & \
-                                (gaussians_pixel[b, :, 1] <= self.near_point_cloud_range[5])
-                # fix tab
-                gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-                gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-
-                near_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-                near_gaussians_feat_mask.append(gaussians_feat_mask_i)
+            mask_pixel = (cylinder_r <= self.near_point_cloud_range[3]) & \
+                        (gaussians_pixel[..., 1] >= self.near_point_cloud_range[2]) & \
+                        (gaussians_pixel[..., 1] <= self.near_point_cloud_range[5])
+            near_gaussians_pixel_mask = [gaussians_pixel[b][mask_pixel[b]] for b in range(bs)]
+            near_gaussians_feat_mask = [gaussians_feat[b][mask_pixel[b]] for b in range(bs)]
 
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         gaussians_volume = self.near_volume_gs(
@@ -308,10 +303,12 @@ class OmniGaussianCylinderVolume(BaseModule):
         data_dict["mask_dptm"] = mask_dptm
 
 
-        test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
+        test_img = to_pil_image(render_pkg_volume["image"][0,1].clip(min=0, max=1))    
         test_img.save('render_volume_mp3d_volume.png')
-        test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
+        test_img = to_pil_image(rgb_gt[0,1].clip(min=0, max=1))    
         test_img.save('render_gt_mp3d_volume.png')
+        test_img = to_pil_image(render_pkg_pixel["image"][0,1].clip(min=0, max=1))    
+        test_img.save('render_pixel_mp3d_volume.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
         test_img.save('render_bev_mp3d_volume.png')
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
@@ -385,7 +382,7 @@ class OmniGaussianCylinderVolume(BaseModule):
         #     set_loss("depth_abs", split, depth_abs_loss, self.loss_args.weight_depth_abs)
         ## Depth loss for volume-gs
         if self.loss_args.weight_depth_abs_vol > 0:
-            depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] - depth_m_gt)
+            depth_abs_loss_vol = torch.abs(render_pkg_volume["depth"] * mask_dptm.unsqueeze(2) - depth_m_gt * mask_dptm.unsqueeze(2))
             depth_abs_loss_vol = depth_abs_loss_vol * conf_m_gt
             depth_abs_loss_vol = depth_abs_loss_vol.mean()
             loss = loss + self.loss_args.weight_depth_abs_vol * depth_abs_loss_vol
@@ -471,12 +468,24 @@ class OmniGaussianCylinderVolume(BaseModule):
                 rays_d=None
             )
 
-        output_imgs = render_pkg_fuse["image"] # b v 3 h w
+        output_positions = data_dict["output_positions"]
+        output_cylinder_r = torch.sqrt(output_positions[..., 0]**2 + output_positions[..., 2]**2 + 1e-5)
+        mask_dptm = (output_cylinder_r < x_end) & \
+                    (output_positions[..., 1] > z_start) & (output_positions[..., 1] < z_end)
+        
+        mask_dptm = mask_dptm.float()
+
+        output_imgs = render_pkg_fuse["image"] * mask_dptm.unsqueeze(2) # b v 3 h w
         output_depths = render_pkg_fuse["depth"].squeeze(2) # b v h w
 
-        target_imgs = data_dict["output_imgs"] # b v 3 h w
-        target_depths = data_dict["output_depths"] # b v h w
-        target_depths_m = data_dict["output_depths_m"] # b v h w
+        target_imgs = data_dict["output_imgs"] * mask_dptm.unsqueeze(2) # b v 3 h w
+        target_depths = data_dict["output_depths"] # b v 1 h w
+        target_depths_m = data_dict["output_depths_m"] # b v 1 h w
+        
+        test_img = to_pil_image(target_imgs[0,1])    
+        test_img.save('render_gt_mp3d_volume_t.png')
+        test_img = to_pil_image(output_imgs[0,1])    
+        test_img.save('render_volume_mp3d_volume_t.png')
 
         preds = {"img": output_imgs, "depth": output_depths, "gaussian": gaussians_all}
         gts = {"img": target_imgs, "depth": target_depths, "depth_m": target_depths_m}
