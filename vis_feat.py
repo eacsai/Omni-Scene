@@ -199,3 +199,126 @@ def save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply"):
     o3d.io.write_point_cloud(filename, pcd, write_ascii=True)
     print(f"点云已成功保存到当前目录下的 '{filename}' 文件中。")
     print("您可以使用MeshLab, CloudCompare或Blender等软件打开查看。")
+
+
+# ===================================================================
+# 1. 新增的辅助函数，用于将计数值张量可视化为矩形蓝色热力图
+# ===================================================================
+def visualize_counts_as_heatmap(count_tensor, h, w, filename, cmap_name='Blues'):
+    """
+    将计数值张量可视化为热力图并保存。
+
+    参数:
+    count_tensor (torch.Tensor): 形状为 [H*W, C] 或 [H*W] 的计数值张量。
+    h (int): 热力图的高度。
+    w (int): 热力图的宽度。
+    filename (str): 保存图像的文件名。
+    cmap_name (str): Matplotlib Colormap的名称。
+    """
+    print(f"正在可视化并保存到: {filename} ...")
+    
+    # a. 将张量移至CPU并转为NumPy
+    counts = count_tensor.detach().cpu().numpy()
+
+    # b. 我们只关心计数值，所以取第一个通道或求和即可
+    #    这里我们假设所有通道的计数值都一样，取第一个通道
+    if counts.ndim > 1:
+        counts = counts[:, 0]
+
+    # c. 重塑为2D图像形状 [H, W]
+    count_map = counts.reshape(h, w)
+
+    # d. 归一化到 [0, 1] 范围
+    # --- 修改开始 ---
+    # 使用对数缩放来增强低计数值的对比度
+    # 加1是为了避免 log(0) 出现错误
+    log_counts = np.log1p(count_map)  # log1p(x) is equivalent to log(1 + x)
+    max_log_count = log_counts.max()
+
+    if max_log_count > 0:
+        normalized_map = log_counts / max_log_count
+    else:
+        normalized_map = np.zeros_like(count_map, dtype=np.float32)
+
+    # e. 应用颜色图 (例如 'Blues', 'viridis', 'jet')
+    #    cmap函数返回的是 [H, W, 4] 的RGBA图像，数值范围[0,1]
+    colored_map = cm.get_cmap(cmap_name)(normalized_map)
+
+    # f. 转换为 [0, 255] 的8位整数，并丢弃Alpha通道
+    img_array = (colored_map[:, :, :3] * 255).astype(np.uint8)
+
+    # g. 使用Pillow保存为图片
+    Image.fromarray(img_array).save(filename)
+
+# ===================================================================
+# 2. 新增的函数，用于将计数值张量可视化为圆形（极坐标）热力图
+# ===================================================================
+def visualize_counts_as_polar_heatmap(count_tensor, num_r, num_theta, filename, cmap_name='Blues'):
+    """
+    将计数值张量在极坐标系中可视化为圆形热力图并保存为带透明背景的PNG图片。
+
+    参数:
+    count_tensor (torch.Tensor): 形状为 [num_r * num_theta, C] 或 [num_r * num_theta] 的计数值张量。
+    num_r (int): 半径方向的网格数 (圆心到边缘的划分数量)。
+    num_theta (int): 角度方向的网格数 (圆周的划分数量)。
+    filename (str): 保存图像的文件名 (推荐使用.png格式以支持透明度)。
+    cmap_name (str): Matplotlib Colormap的名称。
+    """
+    print(f"正在可视化圆形热力图并保存到: {filename} ...")
+
+    # a. 将张量移至CPU并转为NumPy
+    counts = count_tensor.detach().cpu().numpy()
+    if counts.ndim > 1:
+        counts = counts[:, 0]
+
+    # b. 将一维数据重塑为极坐标网格 [半径, 角度]
+    polar_grid = counts.reshape(num_r, num_theta)
+
+    # c. 使用对数缩放来增强对比度
+    log_grid = np.log1p(polar_grid)
+    max_log_val = log_grid.max()
+    normalized_grid = log_grid / max_log_val if max_log_val > 0 else np.zeros_like(log_grid)
+
+    # d. 创建输出图像的笛卡尔坐标网格
+    #    图像尺寸设为直径，即 2 * num_r
+    img_size = num_r * 2
+    x, y = np.meshgrid(np.arange(img_size), np.arange(img_size))
+
+    # e. 将笛卡尔坐标的原点移到图像中心
+    x_centered = x - num_r + 0.5
+    y_centered = y - num_r + 0.5
+
+    # f. 将每个像素的 (x, y) 坐标转换为极坐标 (r, theta)
+    #    计算半径 (距离中心的距离)
+    cartesian_r = np.sqrt(x_centered**2 + y_centered**2)
+    #    计算角度, np.arctan2 返回 [-pi, pi]
+    cartesian_theta = np.arctan2(y_centered, x_centered)
+
+    # g. 将计算出的 (r, theta) 映射到我们的极坐标数据网格的索引
+    #    半径索引
+    r_idx = cartesian_r.astype(int)
+    #    角度索引: 将 [-pi, pi] 映射到 [0, num_theta-1]
+    theta_idx = ((cartesian_theta + np.pi) / (2 * np.pi) * num_theta).astype(int)
+    #    防止索引越界
+    theta_idx = np.clip(theta_idx, 0, num_theta - 1)
+
+    # h. 创建一个带Alpha通道的透明画布 [H, W, 4]
+    #    (R, G, B, Alpha), 初始全部透明 (Alpha=0)
+    img_rgba = np.zeros((img_size, img_size, 4), dtype=np.uint8)
+
+    # i. 填充颜色：只填充在最大半径内的像素
+    #    创建一个布尔掩码，标记所有在圆形内的像素
+    valid_mask = r_idx < num_r
+    
+    # j. 根据索引从归一化网格中获取对应的值
+    values_to_colorize = normalized_grid[r_idx[valid_mask], theta_idx[valid_mask]]
+
+    # k. 应用颜色图
+    cmap = cm.get_cmap(cmap_name)
+    colors = cmap(values_to_colorize)  # 返回 [N, 4] 的 RGBA 图像，数值范围 [0, 1]
+
+    # l. 将颜色值 [0, 1] 转换为 [0, 255] 的8位整数，并应用到画布的有效区域
+    img_rgba[valid_mask] = (colors * 255).astype(np.uint8)
+
+    # m. 使用Pillow从RGBA数组创建图像并保存
+    Image.fromarray(img_rgba, 'RGBA').save(filename)

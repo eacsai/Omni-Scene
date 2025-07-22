@@ -4,6 +4,7 @@ from einops import rearrange
 
 from .unimatch.utils import split_feature, merge_splits
 import torch.nn.functional as F
+from .rope import RotaryEmbedding2D, apply_2d_rotary_pos_emb
 
 
 def single_head_full_attention(q, k, v):
@@ -312,6 +313,13 @@ class TransformerLayer(nn.Module):
 
         self.with_shift = with_shift
 
+        # <<< --- 1. 新增RoPE模块 --- >>>
+        # 您的代码中nhead=1，所以head_dim = d_model
+        # RoPE的维度应该等于每个注意力头的维度
+        assert nhead == 1, "此RoPE实现目前仅支持单头注意力"
+        self.rope = RotaryEmbedding2D(dim=d_model)
+        # <<< ------------------------ >>>
+
         # multi-head attention
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
         self.k_proj = nn.Linear(d_model, d_model, bias=False)
@@ -347,6 +355,8 @@ class TransformerLayer(nn.Module):
         else:
             attn_type = self.attention_type
 
+        b, l, c = source.shape
+
         # source, target: [B, L, C] for 2-view
         # for multi-view cross-attention, source: [B, L, C], target: [B, N-1, L, C]
         query, key, value = source, target, target
@@ -355,6 +365,35 @@ class TransformerLayer(nn.Module):
         query = self.q_proj(query)  # [B, L, C]
         key = self.k_proj(key)  # [B, L, C] or [B, N-1, L, C]
         value = self.v_proj(value)  # [B, L, C] or [B, N-1, L, C]
+
+
+        # <<< --- 2. 注入RoPE的核心修改 --- >>>
+        if height is not None and width is not None:
+            # 生成RoPE系数
+            cos_x, sin_x, cos_y, sin_y = self.rope(height, width, device=query.device)
+
+            # 对Query应用RoPE
+            # [B, H*W, C] -> [B, H, W, 1, C] (nhead=1)
+            query_spatial = query.view(b, height, width, self.nhead, c)
+            query = apply_2d_rotary_pos_emb(query_spatial, cos_x, sin_x, cos_y, sin_y)
+            query = query.view(b, l, c) # 恢复形状
+
+            # 对Key应用RoPE (需要处理多视角的情况)
+            if key.dim() == 3: # 2-view or self-attention
+                key_spatial = key.view(b, height, width, self.nhead, c)
+                key = apply_2d_rotary_pos_emb(key_spatial, cos_x, sin_x, cos_y, sin_y)
+                key = key.view(b, l, c)
+            elif key.dim() == 4: # multi-view cross-attention [B, M, L, C]
+                m = key.shape[1]
+                key_spatial = key.view(b, m, height, width, self.nhead, c)
+                # RoPE系数需要扩展以匹配多视图维度
+                cos_x_mv = cos_x.unsqueeze(1) # [1, 1, H, W, 1, D/2]
+                sin_x_mv = sin_x.unsqueeze(1)
+                cos_y_mv = cos_y.unsqueeze(1)
+                sin_y_mv = sin_y.unsqueeze(1)
+                key = apply_2d_rotary_pos_emb(key_spatial, cos_x_mv, sin_x_mv, cos_y_mv, sin_y_mv)
+                key = key.view(b, m, l, c)
+
 
         if attn_type == "swin" and attn_num_splits > 1:
             if self.nhead > 1:

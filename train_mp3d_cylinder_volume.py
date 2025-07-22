@@ -167,8 +167,8 @@ def main(args):
     #     print(f'successfully resumed from epoch{first_epoch}-iter{global_iter}')
     # else:
     #     resume_step = -1
-    accelerator.print(f"Resuming from checkpoint {path}")
-    accelerator.load_state(osp.join(path), map_location='cpu', strict=False)
+    # accelerator.print(f"Resuming from checkpoint {path}")
+    # accelerator.load_state(osp.join(path), map_location='cpu', strict=False)
         
     print('work dir: ', args.work_dir)
     
@@ -179,7 +179,7 @@ def main(args):
         my_model.train()
         data_time_s = time.time()
         time_s = time.time()
-        for i_iter, batch in enumerate(train_dataloader):
+        for i_iter, batch in enumerate(val_dataloader):
             # forward + backward + optimize
             data_time_e = time.time()
             with accelerator.accumulate(my_model):
@@ -196,27 +196,6 @@ def main(args):
             
             # Checks if the accelerator has performed an optimization step behind the scenes
             accelerator.wait_for_everyone()
-            if accelerator.sync_gradients and accelerator.is_main_process:
-                if global_iter > 0 and global_iter % cfg.save_freq == 0:
-                    if accelerator.is_main_process:
-                        save_file_name = os.path.join(os.path.abspath(args.work_dir), f'checkpoint-{global_iter}')
-                        accelerator.save_state(save_file_name)
-                        dst_file = osp.join(args.work_dir, 'latest')
-                        mmengine.utils.symlink(save_file_name, dst_file)
-                        if logger is not None:
-                            logger.info('[TRAIN] Save latest state dict to {}.'.format(save_file_name))
-                
-                if global_iter > 0 and global_iter % cfg.val_freq == 0:
-                    my_model.eval()
-                    if accelerator.is_main_process:
-                        for i_iter_val, batch_val in enumerate(val_dataloader):
-                            val_batch_save_dir = osp.join(cfg.output_dir, cfg.exp_name, "validation",
-                                                "step-{}/batch-{}".format(global_iter, i_iter_val))
-                            log_val = my_model.validation_step(batch_val, val_batch_save_dir)
-                            # log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
-                            log.update(log_val)
-                    my_model.train()
-            
             time_e = time.time()
 
             # print loss log regularly

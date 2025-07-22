@@ -6,7 +6,7 @@ from mmengine.model import BaseModule
 from mmengine.registry import MODELS
 import warnings
 from einops import rearrange
-from vis_feat import single_features_to_RGB
+from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap, visualize_counts_as_polar_heatmap
 
 @MODELS.register_module()
 class VolumeGaussianCylinder(BaseModule):
@@ -119,6 +119,38 @@ class VolumeGaussianCylinder(BaseModule):
         # single_features_to_RGB(project_feats_thetar, img_name='feat_thetar.png')
         # single_features_to_RGB(project_feats_ztheta, img_name='feat_ztheta.png')
         # single_features_to_RGB(project_feats_rz, img_name='feat_rz.png')
+
+        # vis count_rtheta
+        # linear_inds_rtheta_i = (candidate_coords_thetar_i[..., 1] * self.tpv_theta + candidate_coords_thetar_i[..., 0]).to(dtype=torch.int64)
+        # count_rtheta_i = project_feats_thetar_i.new_zeros((self.tpv_theta * self.tpv_r, c), dtype=torch.float32)
+        # ones_rtheta_i = torch.ones_like(candidate_feats_i)
+        # count_rtheta_i.scatter_add_(0, linear_inds_rtheta_i.unsqueeze(-1).expand(-1, c), ones_rtheta_i)
+        # count_rtheta_i = torch.where(count_rtheta_i == 0, torch.ones_like(count_rtheta_i), count_rtheta_i)
+
+        # visualize_counts_as_polar_heatmap(count_rtheta_i,
+        #                             self.tpv_r, 
+        #                             self.tpv_theta, 
+        #                             'count_hw.png', 
+        #                             cmap_name='Blues'
+        #                             )
+        # visualize_counts_as_heatmap(count_ztheta_i,
+        #                             self.tpv_z, 
+        #                             self.tpv_theta, 
+        #                             'count_zh.png', 
+        #                             cmap_name='Blues'
+        #                             )
+        # # vis count_zr
+        # linear_inds_zr_i = (candidate_coords_rz_i[..., 1] * self.tpv_r + candidate_coords_rz_i[..., 0]).to(dtype=torch.int64)
+        # count_zr_i = project_feats_rz_i.new_zeros((self.tpv_r * self.tpv_z, c), dtype=torch.float32)
+        # ones_rz_i = torch.ones_like(candidate_feats_i)
+        # count_zr_i.scatter_add_(0, linear_inds_zr_i.unsqueeze(-1).expand(-1, c), ones_rz_i)
+        # count_zr_i = torch.where(count_rz_i == 0, torch.ones_like(count_zr_i), count_zr_i)
+        # visualize_counts_as_heatmap(count_zr_i,
+        #                             self.tpv_z, 
+        #                             self.tpv_r, 
+        #                             'count_wz.png', 
+        #                             cmap_name='Blues'
+        #                             )
 
         if self.use_checkpoint and status != "test":
             input_vars_enc = (img_feats, project_feats, img_metas)

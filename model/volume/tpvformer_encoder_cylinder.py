@@ -10,7 +10,7 @@ from .cross_view_hybrid_attention import TPVCrossViewHybridAttention
 from .image_cross_attention import TPVMSDeformableAttention3D
 from einops import rearrange
 
-def show_vis_points(reference_points_cam, idx=0):
+def show_vis_points(reference_points_cam, idx=0, point_size=15):
     vis_points = reference_points_cam[0,0,:,idx,:].view(-1, 2)
     # 1. 将Tensor转换为NumPy数组 (如果它在GPU上，先移到CPU)
     if vis_points.is_cuda:
@@ -31,7 +31,7 @@ def show_vis_points(reference_points_cam, idx=0):
 
     # 3. 绘制散点图
     # s: 点的大小, marker: 点的形状
-    ax.scatter(u_coords, v_coords, s=1, marker='.')
+    ax.scatter(u_coords, v_coords, s=point_size, marker='.')
 
     # 4. 设置坐标轴范围和标签
     ax.set_xlim(0, 1)
@@ -45,18 +45,6 @@ def show_vis_points(reference_points_cam, idx=0):
     ax.set_ylabel("v (Normalized Height Coordinate)")
     ax.set_title("Visualization of Sampled Points (2:1 Aspect Ratio)")
 
-    # 5. 设置坐标轴的宽高比
-    # ax.set_aspect('equal') 会使得x轴的一个单位长度等于y轴的一个单位长度。
-    # 我们希望的是整个绘图区域（由xlim和ylim定义）呈现2:1的宽高比。
-    # 由于我们的figsize已经设置了2:1，并且xlim和ylim都是[0,1]，
-    # 'auto' 或不设置通常能工作。但为了更精确控制数据的显示比例：
-    # aspect = (data_y_range / figure_height_inches) / (data_x_range / figure_width_inches)
-    # 对于我们的情况，data_x_range = 1, data_y_range = 1.
-    # aspect = (1 / fig_height_inches) / (1 / fig_width_inches)
-    # aspect = fig_width_inches / fig_height_inches = 2.0 (这是Y单位相对于X单位的比例)
-    # 不对，ax.set_aspect() 设置的是 `data_units_y / data_units_x` 的显示比例。
-    # 如果我们希望x轴的[0,1]范围在视觉上是y轴[0,1]范围的两倍长，
-    # 那么 y的一个数据单位的视觉长度 应该是 x的一个数据单位视觉长度的 0.5 倍。
     ax.set_aspect(0.5, adjustable='box')
     # 'adjustable="box"' 意味着通过调整绘图框的尺寸来达到这个比例。
 
@@ -310,7 +298,7 @@ class TPVFormerEncoderCylinder(TransformerLayerSequence):
         theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
         phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
         reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4).contiguous()
-        # show_vis_points(reference_points_cam, 0)
+        # show_vis_points(reference_points_cam, 7)
         tpv_mask = (
             (reference_points_cam[..., 1:2] > 0.0)
             & (reference_points_cam[..., 1:2] < 1.0)
@@ -383,7 +371,8 @@ class TPVFormerEncoderCylinder(TransformerLayerSequence):
         for ref_3d in ref_3ds:
             reference_points_cam, tpv_mask = self.pano_point_sampling_cylinder(
                 ref_3d, self.pc_range,
-                img_metas)  # num_cam, bs, hw++, #p, 2
+                img_metas
+            )  # num_cam, bs, hw++, #p, 2
             # reference_points_cam, tpv_mask = self.pano_point_sampling(
             #     ref_3d, self.pc_range,
             #     img_metas)  # num_cam, bs, hw++, #p, 2

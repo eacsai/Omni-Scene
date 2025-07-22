@@ -6,7 +6,7 @@ from mmengine.model import BaseModule
 from mmengine.registry import MODELS
 import warnings
 from einops import rearrange
-from vis_feat import single_features_to_RGB
+from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap, visualize_counts_as_polar_heatmap
 
 @MODELS.register_module()
 class VolumeGaussian(BaseModule):
@@ -27,27 +27,27 @@ class VolumeGaussian(BaseModule):
         if gs_decoder:
             self.gs_decoder = MODELS.build(gs_decoder)
 
-        self.tpv_h = self.encoder.tpv_h  #y
-        self.tpv_w = self.encoder.tpv_w  #x
+        self.tpv_theta = self.encoder.tpv_theta  #theta
+        self.tpv_r = self.encoder.tpv_r  #r
         self.tpv_z = self.encoder.tpv_z  #z
         self.pc_range = self.encoder.pc_range
-        self.pc_xrange = self.pc_range[3] - self.pc_range[0]
-        self.pc_yrange = self.pc_range[4] - self.pc_range[1]
+        self.pc_rrange = self.pc_range[3] - self.pc_range[0]
+        self.pc_thetarange = self.pc_range[4] - self.pc_range[1]
         self.pc_zrange = self.pc_range[5] - self.pc_range[2]
 
     @property
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, img_feats, candidate_gaussians, candidate_feats, candidate_depth_pred, img_metas=None, status="train"):
+    def forward(self, img_feats, candidate_gaussians, candidate_feats, img_color, img_depth, img_metas, status="train"):
         """Forward training function.
         """
         if candidate_gaussians is not None and candidate_feats is not None:
             bs = len(candidate_feats)
             _, c = candidate_feats[0].shape
-            project_feats_hw = candidate_feats[0].new_zeros((bs, self.tpv_h, self.tpv_w, c))
-            project_feats_zh = candidate_feats[0].new_zeros((bs, self.tpv_z, self.tpv_h, c))
-            project_feats_wz = candidate_feats[0].new_zeros((bs, self.tpv_w, self.tpv_z, c))
+            project_feats_thetar = candidate_feats[0].new_zeros((bs, self.tpv_theta, self.tpv_r, c))
+            project_feats_ztheta = candidate_feats[0].new_zeros((bs, self.tpv_z, self.tpv_theta, c))
+            project_feats_rz = candidate_feats[0].new_zeros((bs, self.tpv_r, self.tpv_z, c))
 
             for i in range(bs):
                 candidate_xyzs_i = candidate_gaussians[i][..., :3]
@@ -62,9 +62,9 @@ class VolumeGaussian(BaseModule):
                 x = candidate_xyzs_i[..., 0]
                 y = candidate_xyzs_i[..., 1]
                 z = candidate_xyzs_i[..., 2]
-                candidate_hs_i = (self.tpv_h * (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps))  + torch.pi/2) / torch.pi - eps).int()
-                candidate_ws_i = (self.tpv_w * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) - eps).int()
-                candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - eps).int()
+                candidate_zs_i = (self.tpv_z * (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps))  + torch.pi/2) / torch.pi - eps).int()
+                candidate_thetas_i = (self.tpv_theta * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) - eps).int()
+                candidate_rs_i = (self.tpv_r * torch.sqrt(x**2 + y**2 + z**2 + eps) / self.pc_rrange - eps).int()
                 
                 # original
                 # candidate_hs_i = candidate_uv_map[i][:, 1]
@@ -73,71 +73,100 @@ class VolumeGaussian(BaseModule):
                 # n, c
                 #candidate_feats_i = candidate_feats[[i, valid_mask]]
                 candidate_feats_i = candidate_feats[i]
-                # hw: n, 2
-                candidate_coords_hw_i = torch.stack([candidate_hs_i, candidate_ws_i], dim=-1)
-                linear_inds_hw_i = (candidate_coords_hw_i[..., 0] * self.tpv_w + candidate_coords_hw_i[..., 1]).to(dtype=torch.int64)
-                project_feats_hw_i = project_feats_hw[i].view(-1, c)
-                project_feats_hw_i.scatter_add_(0, linear_inds_hw_i.unsqueeze(-1).expand(-1, c), candidate_feats_i)
-                count_hw_i = project_feats_hw_i.new_zeros((self.tpv_h * self.tpv_w, c), dtype=torch.float32)
-                ones_hw_i = torch.ones_like(candidate_feats_i)
-                count_hw_i.scatter_add_(0, linear_inds_hw_i.unsqueeze(-1).expand(-1, c), ones_hw_i)
-                count_hw_i = torch.where(count_hw_i == 0, torch.ones_like(count_hw_i), count_hw_i)
-                project_feats_hw_i = (project_feats_hw_i / count_hw_i).view(self.tpv_h, self.tpv_w, c)
-                project_feats_hw[i] = project_feats_hw_i
+                # thetar: n, 2
+                candidate_coords_thetar_i = torch.stack([candidate_thetas_i, candidate_rs_i], dim=-1)
+                linear_inds_thetar_i = (candidate_coords_thetar_i[..., 0] * self.tpv_r + candidate_coords_thetar_i[..., 1]).to(dtype=torch.int64)
+                project_feats_thetar_i = project_feats_thetar[i].view(-1, c)
+                project_feats_thetar_i.scatter_add_(0, linear_inds_thetar_i.unsqueeze(-1).expand(-1, c), candidate_feats_i)
+                count_thetar_i = project_feats_thetar_i.new_zeros((self.tpv_theta * self.tpv_r, c), dtype=torch.float32)
+                ones_thetar_i = torch.ones_like(candidate_feats_i)
+                count_thetar_i.scatter_add_(0, linear_inds_thetar_i.unsqueeze(-1).expand(-1, c), ones_thetar_i)
+                count_thetar_i = torch.where(count_thetar_i == 0, torch.ones_like(count_thetar_i), count_thetar_i)
+                project_feats_thetar_i = (project_feats_thetar_i / count_thetar_i).view(self.tpv_theta, self.tpv_r, c)
+                project_feats_thetar[i] = project_feats_thetar_i
 
-                # zh: n, 2
-                candidate_coords_zh_i = torch.stack([candidate_zs_i, candidate_hs_i], dim=-1)
-                linear_inds_zh_i = (candidate_coords_zh_i[..., 0] * self.tpv_h + candidate_coords_zh_i[..., 1]).to(dtype=torch.int64)
-                project_feats_zh_i = project_feats_zh[i].view(-1, c)
-                project_feats_zh_i.scatter_add_(0, linear_inds_zh_i.unsqueeze(-1).expand(-1, c), candidate_feats_i)
-                count_zh_i = project_feats_zh_i.new_zeros((self.tpv_z * self.tpv_h, c), dtype=torch.float32)
-                ones_zh_i = torch.ones_like(candidate_feats_i)
-                count_zh_i.scatter_add_(0, linear_inds_zh_i.unsqueeze(-1).expand(-1, c), ones_zh_i)
-                count_zh_i = torch.where(count_zh_i == 0, torch.ones_like(count_zh_i), count_zh_i)
-                project_feats_zh_i = (project_feats_zh_i / count_zh_i).view(self.tpv_z, self.tpv_h, c)
-                project_feats_zh[i] = project_feats_zh_i
+                linear_inds_rtheta_i = (candidate_coords_thetar_i[..., 1] * self.tpv_theta + candidate_coords_thetar_i[..., 0]).to(dtype=torch.int64)
+                count_rtheta_i = project_feats_thetar_i.new_zeros((self.tpv_theta * self.tpv_r, c), dtype=torch.float32)
+                ones_rtheta_i = torch.ones_like(candidate_feats_i)
+                count_rtheta_i.scatter_add_(0, linear_inds_rtheta_i.unsqueeze(-1).expand(-1, c), ones_rtheta_i)
+                count_rtheta_i = torch.where(count_rtheta_i == 0, torch.ones_like(count_rtheta_i), count_rtheta_i)
 
-                # wz: n, 2
-                candidate_coords_wz_i = torch.stack([candidate_ws_i, candidate_zs_i], dim=-1)
-                linear_inds_wz_i = (candidate_coords_wz_i[..., 0] * self.tpv_z + candidate_coords_wz_i[..., 1]).to(dtype=torch.int64)
-                project_feats_wz_i = project_feats_wz[i].view(-1, c)
-                project_feats_wz_i.scatter_add_(0, linear_inds_wz_i.unsqueeze(-1).expand(-1, c), candidate_feats_i)
-                count_wz_i = project_feats_wz_i.new_zeros((self.tpv_w * self.tpv_z, c), dtype=torch.float32)
-                ones_wz_i = torch.ones_like(candidate_feats_i)
-                count_wz_i.scatter_add_(0, linear_inds_wz_i.unsqueeze(-1).expand(-1, c), ones_wz_i)
-                count_wz_i = torch.where(count_wz_i == 0, torch.ones_like(count_wz_i), count_wz_i)
-                project_feats_wz_i = (project_feats_wz_i / count_wz_i).view(self.tpv_w, self.tpv_z, c)
-                project_feats_wz[i] = project_feats_wz_i
+                # ztheta: n, 2
+                candidate_coords_ztheta_i = torch.stack([candidate_zs_i, candidate_thetas_i], dim=-1)
+                linear_inds_ztheta_i = (candidate_coords_ztheta_i[..., 0] * self.tpv_theta + candidate_coords_ztheta_i[..., 1]).to(dtype=torch.int64)
+                project_feats_ztheta_i = project_feats_ztheta[i].view(-1, c)
+                project_feats_ztheta_i.scatter_add_(0, linear_inds_ztheta_i.unsqueeze(-1).expand(-1, c), candidate_feats_i)
+                count_ztheta_i = project_feats_ztheta_i.new_zeros((self.tpv_z * self.tpv_theta, c), dtype=torch.float32)
+                ones_ztheta_i = torch.ones_like(candidate_feats_i)
+                count_ztheta_i.scatter_add_(0, linear_inds_ztheta_i.unsqueeze(-1).expand(-1, c), ones_ztheta_i)
+                count_ztheta_i = torch.where(count_ztheta_i == 0, torch.ones_like(count_ztheta_i), count_ztheta_i)
+                project_feats_ztheta_i = (project_feats_ztheta_i / count_ztheta_i).view(self.tpv_z, self.tpv_theta, c)
+                project_feats_ztheta[i] = project_feats_ztheta_i
+
+                # rz: n, 2
+                candidate_coords_rz_i = torch.stack([candidate_rs_i, candidate_zs_i], dim=-1)
+                linear_inds_rz_i = (candidate_coords_rz_i[..., 0] * self.tpv_z + candidate_coords_rz_i[..., 1]).to(dtype=torch.int64)
+                project_feats_rz_i = project_feats_rz[i].view(-1, c)
+                project_feats_rz_i.scatter_add_(0, linear_inds_rz_i.unsqueeze(-1).expand(-1, c), candidate_feats_i)
+                count_rz_i = project_feats_rz_i.new_zeros((self.tpv_r * self.tpv_z, c), dtype=torch.float32)
+                ones_rz_i = torch.ones_like(candidate_feats_i)
+                count_rz_i.scatter_add_(0, linear_inds_rz_i.unsqueeze(-1).expand(-1, c), ones_rz_i)
+                count_rz_i = torch.where(count_rz_i == 0, torch.ones_like(count_rz_i), count_rz_i)
+                project_feats_rz_i = (project_feats_rz_i / count_rz_i).view(self.tpv_r, self.tpv_z, c)
+                project_feats_rz[i] = project_feats_rz_i
             
-            project_feats_hw = rearrange(project_feats_hw, "b h w c -> b c h w")
-            project_feats_zh = rearrange(project_feats_zh, "b h w c -> b c h w")
-            project_feats_wz = rearrange(project_feats_wz, "b h w c -> b c h w")
-            project_feats = [project_feats_hw, project_feats_zh, project_feats_wz]
+            project_feats_thetar = rearrange(project_feats_thetar, "b h w c -> b c h w")
+            project_feats_ztheta = rearrange(project_feats_ztheta, "b h w c -> b c h w")
+            project_feats_rz = rearrange(project_feats_rz, "b h w c -> b c h w")
+            project_feats = [project_feats_thetar, project_feats_ztheta, project_feats_rz]
         else:
             project_feats = [None, None, None]
 
-        # single_features_to_RGB(project_feats_hw, img_name='feat_hw.png')
-        # single_features_to_RGB(project_feats_zh, img_name='feat_zh.png')
-        # single_features_to_RGB(project_feats_wz, img_name='feat_wz.png')
+        # single_features_to_RGB(project_feats_thetar, img_name='feat_thetar.png')
+        # single_features_to_RGB(project_feats_ztheta, img_name='feat_ztheta.png')
+        # single_features_to_RGB(project_feats_rz, img_name='feat_rz.png')
+
+        # visualize_counts_as_polar_heatmap(count_rtheta_i,
+        #                             self.tpv_r, 
+        #                             self.tpv_theta, 
+        #                             'count_hw.png', 
+        #                             cmap_name='Blues'
+        #                             )
+        # visualize_counts_as_heatmap(count_ztheta_i,
+        #                             self.tpv_z, 
+        #                             self.tpv_theta, 
+        #                             'count_zh.png', 
+        #                             cmap_name='Blues'
+        #                             )
+        # visualize_counts_as_polar_heatmap(count_rz_i,
+        #                             self.tpv_r, 
+        #                             self.tpv_z, 
+        #                             'count_wz.png', 
+        #                             cmap_name='Blues'
+        #                             )
 
         if self.use_checkpoint and status != "test":
             input_vars_enc = (img_feats, project_feats, img_metas)
             outs = torch.utils.checkpoint.checkpoint(
                 self.encoder, *input_vars_enc, use_reentrant=False
             )
-            gaussians = torch.utils.checkpoint.checkpoint(self.gs_decoder, outs, use_reentrant=False)
+            gaussians = torch.utils.checkpoint.checkpoint(self.gs_decoder, 
+                                                          outs,
+                                                          img_color, 
+                                                          img_depth, 
+                                                          img_metas, 
+                                                          use_reentrant=False,
+                                                          )
         else:
             outs = self.encoder(img_feats, project_feats, img_metas)
-            gaussians = self.gs_decoder(outs)
+            gaussians = self.gs_decoder(outs, 
+                                        img_color, 
+                                        img_depth, 
+                                        img_metas,
+                                        use_reentrant=False,
+                                        )
         bs = gaussians.shape[0]
         n_feature = gaussians.shape[-1]
         gaussians = gaussians.reshape(bs, -1, n_feature)
-
-        # K = 5000                 # 要保留的 top K 个高斯球
-        # feature_index = 6         # 第 7 个特征的索引 (0-based)
-        # ranking_feature = gaussians[:, :, feature_index]
-        # _, top_indices = torch.topk(ranking_feature, k=K, dim=1) # dim=1 是高斯球数量的维度
-        # indices_for_gather = top_indices.unsqueeze(-1).expand(-1, -1, 14) # Shape: [6, 10000, 14]
-        # filtered_gaussians = torch.gather(gaussians, dim=1, index=indices_for_gather) # Shape: [6, 10000, 14]
 
         return gaussians

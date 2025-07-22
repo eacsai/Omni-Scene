@@ -5,7 +5,7 @@ import matplotlib
 import matplotlib.cm
 
 
-def gray_to_colormap(img, cmap='rainbow', max_val=None):
+def gray_to_colormap(img, cmap='plasma', max_val=None):
     """
     Transfer gray map to matplotlib colormap
     """

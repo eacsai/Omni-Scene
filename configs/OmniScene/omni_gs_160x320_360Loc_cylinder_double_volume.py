@@ -22,7 +22,7 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_pixel/checkpoint-18000/model.safetensors"
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_pixel/checkpoint-36000/model.safetensors"
 # resume_from = False
 report_to = "tensorboard"
 

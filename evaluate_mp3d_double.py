@@ -1,7 +1,7 @@
 
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -215,13 +215,15 @@ def main(args):
                     # save visualization results
                     v_pred_imgs = pred_imgs[b]
                     v_pred_depths = pred_depths[b].clamp(0.0, 140.0)
+                    v_gt_depths = gt_depths[b].clamp(0.0, 140.0)
                     v_gt_imgs = gt_imgs[b]
                     cat_img_gt = rearrange(v_gt_imgs, "v c h w -> c h (v w)")
                     cat_img_pred = rearrange(v_pred_imgs, "v c h w -> c h (v w)")
                     grid_img = torch.cat([cat_img_gt, cat_img_pred], dim=1)
                     grid_img = (grid_img.permute(1, 2, 0).detach().cpu().numpy().clip(0, 1) * 255.0).astype(np.uint8)
                     grid_depth = depths_to_colors(v_pred_depths)
-                    grid_all = np.concatenate([grid_img, grid_depth], axis=0)
+                    gt_depth = depths_to_colors(v_gt_depths.squeeze())
+                    grid_all = np.concatenate([grid_img, grid_depth, gt_depth], axis=0)
                     imageio.imwrite(osp.join(output_dir, "Batch_{}_Sampe_{}_Scene_{}.png".format(i_iter, b, batch['scene'][b])), grid_all)
         
         torch.cuda.empty_cache()

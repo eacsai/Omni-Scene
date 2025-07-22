@@ -6,7 +6,7 @@ from mmengine.model import BaseModule
 from mmengine.registry import MODELS
 import warnings
 from einops import rearrange
-from vis_feat import single_features_to_RGB
+from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap
 import math
 
 @MODELS.register_module()
@@ -110,9 +110,30 @@ class VolumeGaussianOriginal(BaseModule):
         else:
             project_feats = [None, None, None]
 
+        # TODO: visualize the project feats
         # single_features_to_RGB(project_feats_hw, img_name='feat_hw.png')
         # single_features_to_RGB(project_feats_zh, img_name='feat_zh.png')
         # single_features_to_RGB(project_feats_wz, img_name='feat_wz.png')
+
+        # visualize_counts_as_heatmap(count_hw_i,
+        #                             self.tpv_h, 
+        #                             self.tpv_w, 
+        #                             'count_hw.png', 
+        #                             cmap_name='Blues'
+        #                             )
+        # visualize_counts_as_heatmap(count_zh_i,
+        #                             self.tpv_z, 
+        #                             self.tpv_h, 
+        #                             'count_zh.png', 
+        #                             cmap_name='Blues'
+        #                             )
+        # visualize_counts_as_heatmap(count_wz_i,
+        #                             self.tpv_w, 
+        #                             self.tpv_z, 
+        #                             'count_wz.png', 
+        #                             cmap_name='Blues'
+        #                             )
+
 
         if self.use_checkpoint and status != "test":
             input_vars_enc = (img_feats, project_feats, img_metas)

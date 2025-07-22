@@ -63,7 +63,8 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         self.attn_splits = attn_splits
         self.model = torch.hub.load("facebookresearch/dino:main", "dino_resnet50", trust_repo=True)
         self.plucker_to_embed = nn.Linear(6, 512)
-        self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, 512))
+        self.cams_embeds = nn.Parameter(torch.empty(num_cams, 512))
+        nn.init.normal_(self.cams_embeds, mean=0.0, std=0.02) # 使用正态分布初始化
         # Set up projections
         self.projections = nn.ModuleDict({})
         for index in range(1, self.num_layers):
@@ -165,13 +166,19 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         # downscale
         features = self.downscaler(features)
         features = rearrange(features, "(b v) c h w -> b v c h w", b=b, v=v)
+        if v > 1:
+            # Apply cross-view attention.
+            features_list = list(torch.unbind(features, dim=1))
 
-        # Apply cross-view attention.
-        features_list = list(torch.unbind(features, dim=1))
-        cur_features_list = feature_add_position_list(features_list, self.attn_splits, 128)
-        cur_features_list = self.transformer(cur_features_list, attn_num_splits=self.attn_splits)
+            # Apply sin position embedding.
+            # cur_features_list = feature_add_position_list(features_list, self.attn_splits, 128)
+            # cur_features_list = self.transformer(cur_features_list, attn_num_splits=self.attn_splits)
 
-        features = torch.stack(cur_features_list, dim=1)  # [B, V, C, H, W]
+            # Apply RoPE position embedding.
+            cur_features_list = self.transformer(features_list, attn_num_splits=self.attn_splits)
+
+
+            features = torch.stack(cur_features_list, dim=1)  # [B, V, C, H, W]
 
         # upscale
         features = rearrange(features, "b v c h w -> (b v) c h w")

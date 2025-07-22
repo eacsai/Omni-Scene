@@ -101,6 +101,10 @@ class DatasetMP3D(Dataset):
         context_depths = self.convert_images(context_depths)
         target_depths = self.convert_images(target_depths)
 
+        # for original depth
+        # context_depths = context_depths.float() / 1000.0
+        # target_depths = target_depths.float() / 1000.0
+
         # metric depth path
         depths_m_path = [str(scene_path / v / 'depth_metric.npy') for v in views]
         confs_m_path = [str(scene_path / v / 'depth_conf.npy') for v in views]

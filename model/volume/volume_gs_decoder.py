@@ -342,5 +342,4 @@ class VolumeGaussianDecoder(BaseModule):
         # rgbs[..., 2] = 0.0
 
         gaussians = torch.cat([gs_positions, rgbs, opacity.unsqueeze(-1) / self.gpv, rotation, scale_x, scale_y, scale_z], dim=-1) # bs, w, h, z, gpv, 14
-        predict_depth = depths * opacity
         return gaussians

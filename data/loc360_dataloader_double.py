@@ -78,6 +78,12 @@ def two_sample(scene, extrinsics, stage="train", i=0):
             index_context_right,
             device='cpu',
         )
+        # index_target = torch.randint(
+        #     low=index_context_left + 1,
+        #     high=index_context_right,
+        #     size=(1,),
+        #     device='cpu'
+        # )
     else:
         # When training or validating (visualizing), pick at random.
         # index_middle = torch.randint(
@@ -151,7 +157,7 @@ class Dataset360Loc(IterableDataset):
             seqs = sum(seqs, [])
             self.data.extend(seqs)
 
-        self.times_per_scene = 1000 if self.stage == "train" else 20
+        self.times_per_scene = 1000 if self.stage == "train" else 10
         self.load_images = True
         self.direction = get_panorama_ray_directions(self.height, self.width)
 

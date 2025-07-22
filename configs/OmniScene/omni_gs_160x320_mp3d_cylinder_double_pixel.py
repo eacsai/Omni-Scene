@@ -33,9 +33,9 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-near_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
-far_point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0]
-point_cloud_range = [0.0, 0.0, -4.0, 16.0, 6.28, 4.0] # r, phi, z
+near_point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0] # r, phi, z
+far_point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0]
+point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1

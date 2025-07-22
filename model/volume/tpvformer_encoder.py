@@ -4,18 +4,69 @@ from mmcv.cnn.bricks.transformer import TransformerLayerSequence
 from mmengine.registry import MODELS
 from torch import nn
 from torch.nn.init import normal_
+import matplotlib.pyplot as plt
 
 from .cross_view_hybrid_attention import TPVCrossViewHybridAttention
 from .image_cross_attention import TPVMSDeformableAttention3D
 from einops import rearrange
+
+def show_vis_points(reference_points_cam, idx=0, point_size=15):
+    vis_points = reference_points_cam[0,0,:,idx,:].view(-1, 2)
+    # 1. 将Tensor转换为NumPy数组 (如果它在GPU上，先移到CPU)
+    if vis_points.is_cuda:
+        points_np = vis_points.cpu().numpy()
+    else:
+        points_np = vis_points.numpy()
+
+    u_coords = points_np[:, 0]
+    v_coords = points_np[:, 1]
+
+    # 2. 设置图形和坐标轴
+    # 我们希望图形的显示宽度是高度的两倍。
+    # figsize 的单位是英寸。例如，10英寸宽，5英寸高。
+    fig_width_inches = 10
+    fig_height_inches = fig_width_inches / 2
+
+    fig, ax = plt.subplots(figsize=(fig_width_inches, fig_height_inches))
+
+    # 3. 绘制散点图
+    # s: 点的大小, marker: 点的形状
+    ax.scatter(u_coords, v_coords, s=point_size, marker='.')
+
+    # 4. 设置坐标轴范围和标签
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1) # v 坐标通常从下往上增加
+
+    # 如果希望 (0,0) 在左上角，y轴向下增加（像图片一样），可以反转y轴：
+    # ax.invert_yaxis()
+    # 但通常对于归一化坐标的可视化，保持y轴向上更直观。
+
+    ax.set_xlabel("u (Normalized Width Coordinate)")
+    ax.set_ylabel("v (Normalized Height Coordinate)")
+    ax.set_title("Visualization of Sampled Points (2:1 Aspect Ratio)")
+
+    ax.set_aspect(0.5, adjustable='box')
+    # 'adjustable="box"' 意味着通过调整绘图框的尺寸来达到这个比例。
+
+    # ax.set_aspect('auto') # 另一种选择，让它自动适应figsize
+
+    # 添加网格线以便更好地观察分布
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+    # 调整布局以防止标签被裁剪
+    plt.tight_layout()
+
+    # 6. 显示图形
+    plt.savefig('sample.png')
+    plt.close()
 
 
 @MODELS.register_module()
 class TPVFormerEncoder(TransformerLayerSequence):
 
     def __init__(self,
-                 tpv_h=200,
-                 tpv_w=200,
+                 tpv_theta=200,
+                 tpv_r=200,
                  tpv_z=16,
                  tpv_only=False,
                  pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
@@ -30,8 +81,8 @@ class TPVFormerEncoder(TransformerLayerSequence):
                  return_intermediate=False):
         super().__init__(transformerlayers, num_layers)
 
-        self.tpv_h = tpv_h
-        self.tpv_w = tpv_w
+        self.tpv_theta = tpv_theta
+        self.tpv_r = tpv_r
         self.tpv_z = tpv_z
         self.pc_range = pc_range
         self.real_w = pc_range[3] - pc_range[0]
@@ -41,30 +92,30 @@ class TPVFormerEncoder(TransformerLayerSequence):
         self.level_embeds = nn.Parameter(
             torch.Tensor(num_feature_levels, embed_dims))
         self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, embed_dims))
-        self.tpv_embedding_hw = nn.Embedding(tpv_h * tpv_w, embed_dims)
-        self.tpv_embedding_zh = nn.Embedding(tpv_z * tpv_h, embed_dims)
-        self.tpv_embedding_wz = nn.Embedding(tpv_w * tpv_z, embed_dims)
+        self.tpv_embedding_thetar = nn.Embedding(tpv_theta * tpv_r, embed_dims)
+        self.tpv_embedding_ztheta = nn.Embedding(tpv_z * tpv_theta, embed_dims)
+        self.tpv_embedding_rz = nn.Embedding(tpv_r * tpv_z, embed_dims)
         if not tpv_only:
-            self.project_transform_hw = nn.Conv2d(embed_dims, embed_dims, 3, 1, 1)
-            self.project_transform_zh = nn.Conv2d(embed_dims, embed_dims, 3, 1, 1)
-            self.project_transform_wz = nn.Conv2d(embed_dims, embed_dims, 3, 1, 1)
+            self.project_transform_thetar = nn.Conv2d(embed_dims, embed_dims, 3, 1, 1)
+            self.project_transform_ztheta = nn.Conv2d(embed_dims, embed_dims, 3, 1, 1)
+            self.project_transform_rz = nn.Conv2d(embed_dims, embed_dims, 3, 1, 1)
 
-        ref_3d_hw = self.get_reference_points(tpv_h, tpv_w, self.real_z,
+        ref_3d_thetar = self.get_reference_points(tpv_theta, tpv_r, self.real_z,
                                               num_points_in_pillar[0])
-        ref_3d_zh = self.get_reference_points(tpv_z, tpv_h, self.real_w,
+        ref_3d_ztheta = self.get_reference_points(tpv_z, tpv_theta, self.real_w,
                                               num_points_in_pillar[1])
-        ref_3d_zh = ref_3d_zh.permute(3, 0, 1, 2)[[2, 0, 1]]  # change to x,y,z
-        ref_3d_zh = ref_3d_zh.permute(1, 2, 3, 0)
-        ref_3d_wz = self.get_reference_points(tpv_w, tpv_z, self.real_h,
+        ref_3d_ztheta = ref_3d_ztheta.permute(3, 0, 1, 2)[[2, 0, 1]]  # change to x,y,z
+        ref_3d_ztheta = ref_3d_ztheta.permute(1, 2, 3, 0)
+        ref_3d_rz = self.get_reference_points(tpv_r, tpv_z, self.real_h,
                                               num_points_in_pillar[2])
-        ref_3d_wz = ref_3d_wz.permute(3, 0, 1, 2)[[1, 2, 0]]  # change to x,y,z
-        ref_3d_wz = ref_3d_wz.permute(1, 2, 3, 0)
-        self.register_buffer('ref_3d_hw', ref_3d_hw)
-        self.register_buffer('ref_3d_zh', ref_3d_zh)
-        self.register_buffer('ref_3d_wz', ref_3d_wz)
+        ref_3d_rz = ref_3d_rz.permute(3, 0, 1, 2)[[1, 2, 0]]  # change to x,y,z
+        ref_3d_rz = ref_3d_rz.permute(1, 2, 3, 0)
+        self.register_buffer('ref_3d_thetar', ref_3d_thetar)
+        self.register_buffer('ref_3d_ztheta', ref_3d_ztheta)
+        self.register_buffer('ref_3d_rz', ref_3d_rz)
 
         cross_view_ref_points = self.get_cross_view_ref_points(
-            tpv_h, tpv_w, tpv_z, num_points_in_pillar_cross_view)
+            tpv_theta, tpv_r, tpv_z, num_points_in_pillar_cross_view)
         self.register_buffer('cross_view_ref_points', cross_view_ref_points)
 
         # positional encoding
@@ -197,11 +248,6 @@ class TPVFormerEncoder(TransformerLayerSequence):
             0.5, Z - 0.5, num_points_in_pillar,
             dtype=dtype, device=device).view(-1, 1, 1).expand(
                 num_points_in_pillar, H, W) / Z
-        
-        # zs = torch.linspace(
-        #     0.01, 0.99, num_points_in_pillar,
-        #     dtype=dtype, device=device).view(-1, 1, 1).expand(
-        #         num_points_in_pillar, H, W)
         xs = torch.linspace(
             0.5, W - 0.5, W, dtype=dtype, device=device).view(1, 1, -1).expand(
                 num_points_in_pillar, H, W) / W
@@ -326,10 +372,10 @@ class TPVFormerEncoder(TransformerLayerSequence):
         eps = 1e-5
         tri_reference_points = reference_points.clone()
         spherical_reference_points = torch.ones_like(tri_reference_points, device=tri_reference_points.device)
-        spherical_r = tri_reference_points[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
-        spherical_reference_points[..., 0:1] = -spherical_r * torch.sin(tri_reference_points[..., 1:2]*torch.pi) * torch.sin(tri_reference_points[..., 0:1]*2*torch.pi)
-        spherical_reference_points[..., 1:2] = -spherical_r * torch.cos(tri_reference_points[..., 1:2]*torch.pi)
-        spherical_reference_points[..., 2:3] = -spherical_r * torch.sin(tri_reference_points[..., 1:2]*torch.pi) * torch.cos(tri_reference_points[..., 0:1]*2*torch.pi)
+        spherical_r = tri_reference_points[..., 0:1] * (pc_range[3] - pc_range[0])
+        spherical_reference_points[..., 0:1] = -spherical_r * torch.sin(tri_reference_points[..., 2:3]*torch.pi) * torch.sin(tri_reference_points[..., 1:2]*2*torch.pi)
+        spherical_reference_points[..., 1:2] = -spherical_r * torch.cos(tri_reference_points[..., 2:3]*torch.pi)
+        spherical_reference_points[..., 2:3] = -spherical_r * torch.sin(tri_reference_points[..., 2:3]*torch.pi) * torch.cos(tri_reference_points[..., 1:2]*2*torch.pi)
         B_ref, D, num_query, _ = spherical_reference_points.shape
         
         # init lidar2img
@@ -355,7 +401,7 @@ class TPVFormerEncoder(TransformerLayerSequence):
         theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
         phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
         reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4)
-
+        show_vis_points(reference_points_cam, 7)
         tpv_mask = (
             (reference_points_cam[..., 1:2] > 0.0)
             & (reference_points_cam[..., 1:2] < 1.0)
@@ -379,28 +425,28 @@ class TPVFormerEncoder(TransformerLayerSequence):
         device = mlvl_feats[0].device
 
         # tpv queries and pos embeds
-        tpv_queries_hw = self.tpv_embedding_hw.weight.to(dtype)
-        tpv_queries_zh = self.tpv_embedding_zh.weight.to(dtype)
-        tpv_queries_wz = self.tpv_embedding_wz.weight.to(dtype)
-        tpv_queries_hw = tpv_queries_hw.unsqueeze(0).repeat(bs, 1, 1)
-        tpv_queries_zh = tpv_queries_zh.unsqueeze(0).repeat(bs, 1, 1)
-        tpv_queries_wz = tpv_queries_wz.unsqueeze(0).repeat(bs, 1, 1)
+        tpv_queries_thetar = self.tpv_embedding_thetar.weight.to(dtype)
+        tpv_queries_ztheta = self.tpv_embedding_ztheta.weight.to(dtype)
+        tpv_queries_rz = self.tpv_embedding_rz.weight.to(dtype)
+        tpv_queries_thetar = tpv_queries_thetar.unsqueeze(0).repeat(bs, 1, 1)
+        tpv_queries_ztheta = tpv_queries_ztheta.unsqueeze(0).repeat(bs, 1, 1)
+        tpv_queries_rz = tpv_queries_rz.unsqueeze(0).repeat(bs, 1, 1)
         # add projected feats to tpv queries
         if project_feats[0] is not None and project_feats[1] is not None and project_feats[2] is not None:
-            project_feats_hw, project_feats_zh, project_feats_wz = project_feats
-            project_feats_hw = rearrange(self.project_transform_hw(project_feats_hw), "b c h w -> b (h w) c")
-            project_feats_zh = rearrange(self.project_transform_zh(project_feats_zh), "b c z h -> b (z h) c")
-            project_feats_wz = rearrange(self.project_transform_wz(project_feats_wz), "b c w z -> b (w z) c")
-            tpv_queries_hw = tpv_queries_hw + project_feats_hw
-            tpv_queries_zh = tpv_queries_zh + project_feats_zh
-            tpv_queries_wz = tpv_queries_wz + project_feats_wz
+            project_feats_thetar, project_feats_ztheta, project_feats_rz = project_feats
+            project_feats_thetar = rearrange(self.project_transform_thetar(project_feats_thetar), "b c h w -> b (h w) c")
+            project_feats_ztheta = rearrange(self.project_transform_ztheta(project_feats_ztheta), "b c z h -> b (z h) c")
+            project_feats_rz = rearrange(self.project_transform_rz(project_feats_rz), "b c w z -> b (w z) c")
+            tpv_queries_thetar = tpv_queries_thetar + project_feats_thetar
+            tpv_queries_ztheta = tpv_queries_ztheta + project_feats_ztheta
+            tpv_queries_rz = tpv_queries_rz + project_feats_rz
 
-        tpv_query = [tpv_queries_hw, tpv_queries_zh, tpv_queries_wz]
+        tpv_query = [tpv_queries_thetar, tpv_queries_ztheta, tpv_queries_rz]
 
-        tpv_pos_hw = self.positional_encoding(bs, device, 'z')
-        tpv_pos_zh = self.positional_encoding(bs, device, 'w')
-        tpv_pos_wz = self.positional_encoding(bs, device, 'h')
-        tpv_pos = [tpv_pos_hw, tpv_pos_zh, tpv_pos_wz]
+        tpv_pos_thetar = self.positional_encoding(bs, device, 'z')
+        tpv_pos_ztheta = self.positional_encoding(bs, device, 'w')
+        tpv_pos_rz = self.positional_encoding(bs, device, 'h')
+        tpv_pos = [tpv_pos_thetar, tpv_pos_ztheta, tpv_pos_rz]
 
         # flatten image features of different scales
         feat_flatten = []
@@ -424,11 +470,12 @@ class TPVFormerEncoder(TransformerLayerSequence):
             0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims)
 
         reference_points_cams, tpv_masks = [], []
-        ref_3ds = [self.ref_3d_hw, self.ref_3d_zh, self.ref_3d_wz]
+        ref_3ds = [self.ref_3d_thetar, self.ref_3d_ztheta, self.ref_3d_rz]
         for ref_3d in ref_3ds:
             reference_points_cam, tpv_mask = self.pano_point_sampling_spherical(
                 ref_3d, self.pc_range,
-                img_metas)  # num_cam, bs, hw++, #p, 2
+                img_metas
+            )  # num_cam, bs, hw++, #p, 2
             # reference_points_cam, tpv_mask = self.pano_point_sampling(
             #     ref_3d, self.pc_range,
             #     img_metas)  # num_cam, bs, hw++, #p, 2
@@ -446,8 +493,8 @@ class TPVFormerEncoder(TransformerLayerSequence):
                 feat_flatten,
                 tpv_pos=tpv_pos,
                 ref_2d=ref_cross_view,
-                tpv_h=self.tpv_h,
-                tpv_w=self.tpv_w,
+                tpv_h=self.tpv_theta,
+                tpv_w=self.tpv_r,
                 tpv_z=self.tpv_z,
                 spatial_shapes=spatial_shapes,
                 level_start_index=level_start_index,

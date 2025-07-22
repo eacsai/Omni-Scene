@@ -19,6 +19,8 @@ from .utils.image import maybe_resize
 from .utils.benchmarker import Benchmarker
 from .utils.interpolation import interpolate_extrinsics
 
+from vis_feat import single_features_to_RGB, reduce_gaussian_features_to_rgb, save_point_cloud, point_features_to_rgb_colormap
+
 from pano2cube import Equirec2Cube, Cube2Equirec
 from vis_feat import single_features_to_RGB
 import torchvision.transforms as transforms
@@ -311,6 +313,18 @@ class OmniGaussianCylinderVolume(BaseModule):
         test_img.save('render_pixel_mp3d_volume.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
         test_img.save('render_bev_mp3d_volume.png')
+
+
+        # vis rgb points
+        # idx = 4
+        # opactity = gaussians_volume[..., 6:7]
+        # opactity_mask = (opactity > 0.9).squeeze(-1)
+        # gaussians_volume_save = gaussians_volume[idx][opactity_mask[idx]]
+        # points_xyz = gaussians_volume_save[..., :3].detach().cpu().numpy()
+        # points_rgb = gaussians_volume_save[..., 3:6].detach().cpu().numpy()
+        # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
+
+
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #
         # if self.loss_args.weight_recon > 0:

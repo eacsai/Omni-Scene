@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_All"
+exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_All_Volume"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4 #1e-4
@@ -22,7 +22,8 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_z3/checkpoint-27000/model.safetensors"
+# resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_z3/checkpoint-36000/model.safetensors"
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume/checkpoint-18000/model.safetensors"
 # resume_from = False
 report_to = "tensorboard"
 
