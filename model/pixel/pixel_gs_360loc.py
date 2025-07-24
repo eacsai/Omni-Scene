@@ -19,7 +19,7 @@ from torch.nn.init import normal_
 
 
 @MODELS.register_module()
-class PixelGaussian(BaseModule):
+class PixelGaussian360Loc(BaseModule):
 
     def __init__(self,
                  down_block=None,
@@ -139,26 +139,26 @@ class PixelGaussian(BaseModule):
         bs = origins.shape[0]
 
         gaussians = self.to_gaussians(img_feats)
-        gaussians = rearrange(gaussians, "(b v) (n c) h w -> b (v h w n) c",
-                              b=bs, v=self.num_cams, n=1, c=self.gs_channels)
+        gaussians = rearrange(gaussians, "(b v) c h w -> b v (h w) c",
+                              b=bs, v=self.num_cams, c=self.gs_channels)
         offsets = gaussians[..., :1]
         opacities = self.opt_act(gaussians[..., 1:2])
         scales = self.scale_act(gaussians[..., 2:5])
         rotations = self.rot_act(gaussians[..., 5:9])
         rgbs = self.rgb_act(gaussians[..., 9:12])
 
-        depths_in = rearrange(depths_in, "b v c h w-> b (v h w) c", b=bs, v=self.num_cams)
+        depths_in = rearrange(depths_in, "b v c h w-> b v (h w) c", b=bs, v=self.num_cams)
 
-        origins = rearrange(origins, "b v h w c -> b (v h w) c")
+        origins = rearrange(origins, "b v h w c -> b v (h w) c")
         origins = origins.unsqueeze(-2)
-        directions = rearrange(directions, "b v h w c -> b (v h w) c")
+        directions = rearrange(directions, "b v h w c -> b v (h w) c")
         directions = directions.unsqueeze(-2)
         depth_pred = (depths_in + offsets).clamp(min=0.0)
         means = origins + directions * depth_pred[..., None]
-        means = rearrange(means, "b r n c -> b (r n) c")
+        means = rearrange(means, "b v r n c -> b v (r n) c")
         # means = means + offsets
 
         gaussians = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
-        features = rearrange(img_feats, "(b v) c h w -> b (v h w) c", b=bs, v=self.num_cams)
+        features = rearrange(img_feats, "(b v) c h w -> b v (h w) c", b=bs, v=self.num_cams)
         
         return gaussians, features, depth_pred

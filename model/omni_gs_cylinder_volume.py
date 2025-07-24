@@ -224,8 +224,7 @@ class OmniGaussianCylinderVolume(BaseModule):
             # volume-gs prediction
             pc_range = self.dataset_params.pc_range
             x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-            near_gaussians_pixel_mask, near_gaussians_feat_mask, near_depth_pred_mask = [], [], []
-            far_gaussians_pixel_mask, far_gaussians_feat_mask, far_depth_pred_mask = [], [], []
+            near_gaussians_pixel_mask, near_gaussians_feat_mask = [], []
 
             cylinder_r = torch.sqrt(gaussians_pixel[..., 0]**2 + gaussians_pixel[..., 2]**2 + 1e-5)
 

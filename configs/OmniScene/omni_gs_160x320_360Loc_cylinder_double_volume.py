@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_Volume"
+exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_Volume_new"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4 #1e-4
@@ -22,7 +22,7 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_pixel/checkpoint-36000/model.safetensors"
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Pixel_Pan/checkpoint-12000/model.safetensors"
 # resume_from = False
 report_to = "tensorboard"
 
@@ -79,13 +79,13 @@ loss_args = dict(
     depth_abs_loss_vol_type="mask",
     mask_dptm=True,
     perceptual_resolution=[resolution[0], resolution[1]],
+    weight_recon=1.0,
     weight_perceptual=0.05,
-    weight_recon_vol=1.0,
-    weight_perceptual_vol=0.05,
-    weight_depth_abs_vol=1.0,
-    weight_dist_vol=0,
-    weight_normal_error_vol=0,
-    weight_volume_loss=0.1 #0.1
+    weight_depth_abs=0.1,
+    weight_recon_vol=0,
+    weight_perceptual_vol=0,
+    weight_depth_abs_vol=0,
+    weight_volume_loss=0.05 #0.1
 )
 
 pc_range = point_cloud_range
@@ -184,7 +184,6 @@ near_self_layer = dict(
     ffn_dropout=0.1,
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
-
 far_self_cross_layer = dict(
     type='TPVFormerLayer',
     attn_cfgs=[
@@ -246,7 +245,7 @@ far_self_layer = dict(
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
 model = dict(
-    type='OmniGaussianCylinderVolume',
+    type='OmniGaussianCylinderVolume360Loc',
     use_checkpoint=use_checkpoint,
     near_point_cloud_range=near_point_cloud_range,
     far_point_cloud_range=far_point_cloud_range,
@@ -263,7 +262,7 @@ model = dict(
         add_extra_convs='on_input',
         num_outs=4),
     pixel_gs=dict(
-        type="PixelGaussian",
+        type="PixelGaussian360Loc",
         use_checkpoint=use_checkpoint,
         down_block=dict(
             type='MVDownsample2D',

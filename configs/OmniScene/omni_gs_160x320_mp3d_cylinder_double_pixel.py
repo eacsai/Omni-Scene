@@ -245,7 +245,7 @@ far_self_layer = dict(
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
 model = dict(
-    type='OmniGaussianCylinderPixelVolume',
+    type='OmniGaussianCylinderPixel360Loc',
     use_checkpoint=use_checkpoint,
     near_point_cloud_range=near_point_cloud_range,
     far_point_cloud_range=far_point_cloud_range,
@@ -262,7 +262,7 @@ model = dict(
         add_extra_convs='on_input',
         num_outs=4),
     pixel_gs=dict(
-        type="PixelGaussian",
+        type="PixelGaussian360Loc",
         use_checkpoint=use_checkpoint,
         down_block=dict(
             type='MVDownsample2D',

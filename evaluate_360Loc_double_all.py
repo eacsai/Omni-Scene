@@ -21,7 +21,7 @@ from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType,
 from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc, compute_absrel
 from tools.visualization import depths_to_colors
 
-from data.loc360_dataloader_double import load_360Loc_data
+from data.loc360_dataloader_double_all import load_360Loc_data
 
 import warnings
 warnings.filterwarnings("ignore")

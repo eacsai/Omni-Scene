@@ -5,10 +5,10 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_Pixel_new"
+exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan"
 output_dir = "/data/qiwei/nips25/workdirs"
 
-lr = 1e-4
+lr = 1e-4 #1e-4
 grad_max_norm = 1.0
 print_freq = 100
 save_freq = 3000
@@ -22,7 +22,8 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume_z3/checkpoint-36000/model.safetensors"
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_z3/checkpoint-36000/model.safetensors"
+# resume_from = False
 report_to = "tensorboard"
 
 volume_only = False
@@ -80,11 +81,11 @@ loss_args = dict(
     perceptual_resolution=[resolution[0], resolution[1]],
     weight_recon=1.0,
     weight_perceptual=0.05,
-    weight_depth_abs=1.0,
+    weight_depth_abs=0.1,
     weight_recon_vol=0,
     weight_perceptual_vol=0,
     weight_depth_abs_vol=0,
-    weight_volume_loss=0 #0.1
+    weight_volume_loss=0.05 #0.1
 )
 
 pc_range = point_cloud_range
@@ -183,7 +184,6 @@ near_self_layer = dict(
     ffn_dropout=0.1,
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
-
 far_self_cross_layer = dict(
     type='TPVFormerLayer',
     attn_cfgs=[
@@ -245,7 +245,7 @@ far_self_layer = dict(
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
 model = dict(
-    type='OmniGaussianCylinderPixel360LocPan',
+    type='OmniGaussianCylinderVolume360LocPan',
     use_checkpoint=use_checkpoint,
     near_point_cloud_range=near_point_cloud_range,
     far_point_cloud_range=far_point_cloud_range,

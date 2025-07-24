@@ -65,55 +65,11 @@ def two_sample(scene, extrinsics, stage="train", i=0):
         ).item()
     index_context_right = index_context_left + context_gap
 
-    # Pick the target view indices.
-    if stage == "val":
-        # When testing, pick all.
-        # index_target = torch.arange(
-        #     index_context_left,
-        #     index_context_right + 1,
-        #     device='cpu',
-        # )
-        # index_target = torch.arange(
-        #     index_context_left + 1,
-        #     index_context_right,
-        #     device='cpu',
-        # )
-        index_target = torch.randint(
-            low=index_context_left + 1,
-            high=index_context_right,
-            size=(1,),
-            device='cpu'
-        )
-    else:
-        # When training or validating (visualizing), pick at random.
-        # index_middle = torch.randint(
-        #     index_context_left + 1,
-        #     index_context_right,
-        #     size=tuple(),
-        #     device='cpu',
-        # ).item()
-        # index_target = [
-        #     index_context_left,
-        #     index_middle,
-        #     index_context_right,
-        # ]
-        index_target = torch.randint(
-            low=index_context_left + 1,
-            high=index_context_right,
-            size=(1,),
-            device='cpu'
-        )
-        # index_target = torch.arange(
-        #     index_context_left,
-        #     index_context_right + 1,
-        #     device='cpu',
-        # )
-
-        # index_target = torch.arange(
-        #     index_context_left + 1,
-        #     index_context_right,
-        #     device='cpu',
-        # )
+    index_target = torch.arange(
+        index_context_left,
+        index_context_right + 1,
+        device='cpu',
+    )
 
     return (
         torch.tensor((index_context_left, index_context_right)),
