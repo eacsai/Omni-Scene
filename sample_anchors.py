@@ -106,3 +106,47 @@ def project_onto_planes(coordinates):
     inv_planes = torch.linalg.inv(planes).unsqueeze(0).repeat(N, 1, 1, 1)
     projections = coordinates @ inv_planes
     return projections[..., :2] # [N, n_planes, M, 3]
+
+def transform_points(points, extrinsics):
+    """
+    使用相机外参矩阵变换一批点云。
+
+    参数:
+    points (torch.Tensor): 形状为 [B, N, 3] 的点云张量。
+    extrinsics (torch.Tensor): 形状为 [B, 4, 4] 的相机外参(w2c)矩阵。
+
+    返回:
+    torch.Tensor: 形状为 [B, N, 3] 的变换后的点云张量。
+    """
+    # 获取批次大小 B 和点的数量 N
+    B, N, _ = points.shape
+    
+    # 1. 将3D点云转换为齐次坐标
+    # 创建一个形状为 [B, N, 1] 且值为1的张量
+    ones = torch.ones((B, N, 1), device=points.device, dtype=points.dtype)
+    # 沿着最后一个维度拼接，从 [B, N, 3] -> [B, N, 4]
+    homogeneous_points = torch.cat([points, ones], dim=-1)
+
+    # 2. 调整张量形状以进行批处理矩阵乘法
+    # 我们需要将每个4x4矩阵与其对应的N个4x1向量相乘。
+    # 为了高效地做到这一点，我们将点云张量转置为 [B, 4, N]
+    # 这样就可以使用批处理矩阵乘法了。
+    homogeneous_points_transposed = torch.transpose(homogeneous_points, 1, 2)
+    
+    # 3. 执行批处理矩阵乘法
+    # [B, 4, 4] @ [B, 4, N] -> [B, 4, N]
+    transformed_points_transposed = torch.matmul(extrinsics, homogeneous_points_transposed)
+    
+    # 4. 将结果转置回标准形状
+    # [B, 4, N] -> [B, N, 4]
+    transformed_points_homogeneous = torch.transpose(transformed_points_transposed, 1, 2)
+    
+    # 5. 将齐次坐标转换回3D坐标
+    # 取出前三个分量 [x', y', z']
+    transformed_points_3d = transformed_points_homogeneous[..., :3]
+    
+    # (可选) 处理w分量不为1的情况（通常在透视投影中出现，但在外参变换中w总是1）
+    # w = transformed_points_homogeneous[..., 3:]
+    # transformed_points_3d = transformed_points_homogeneous[..., :3] / w
+    
+    return transformed_points_3d

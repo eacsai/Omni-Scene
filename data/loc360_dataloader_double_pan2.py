@@ -65,17 +65,17 @@ def two_sample(scene, extrinsics, stage="train", i=0):
         ).item()
     index_context_right = index_context_left + context_gap
 
+    index_target = torch.arange(
+            index_context_left + 1,
+            index_context_right,
+            device='cpu',
+        )
+
     # index_target = torch.arange(
-    #         index_context_left + 1,
-    #         index_context_right,
+    #         index_context_left,
+    #         index_context_right + 1,
     #         device='cpu',
     #     )
-
-    index_target = torch.arange(
-        index_context_left,
-        index_context_right + 1,
-        device='cpu',
-    )
 
     return (
         torch.tensor((index_context_left, index_context_right)),
@@ -125,7 +125,7 @@ class Dataset360Loc(IterableDataset):
             seqs = sum(seqs, [])
             self.data.extend(seqs)
 
-        self.times_per_scene = 1000 if self.stage == "train" else 100
+        self.times_per_scene = 1000 if self.stage == "train" else 10
         self.load_images = True
         self.direction = get_panorama_ray_directions(self.height, self.width)
 
@@ -183,7 +183,7 @@ class Dataset360Loc(IterableDataset):
                 # Resize the world to make the baseline 1.
                 context_extrinsics = extrinsics_orig[context_indices]
                 target_extrinsics = extrinsics_orig[target_indices]
-                ref_extrinsics = target_extrinsics[:1]
+                ref_extrinsics = context_extrinsics[:1]
                 target_extrinsics_relative = torch.inverse(ref_extrinsics) @ target_extrinsics
                 context_extrinsics_relative = torch.inverse(ref_extrinsics) @ context_extrinsics
                 # target_extrinsics_relative = w2w.T @ target_extrinsics_relative @ w2w

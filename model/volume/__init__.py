@@ -26,5 +26,4 @@ __all__ = [
     'VolumeGaussianDecoder', 'VolumeGaussianDecoderOriginal', 'VolumeGaussianDecoderCos', 'VolumeGaussianDecoderConf', 'VolumeGaussianDecoderCylinder',
     'ViT', 'LN2d',
     'VolumeGaussian', 'VolumeGaussianOriginal', 'VolumeGaussianCos', 'VolumeGaussianConf', 'VolumeGaussianCylinder',
-    
 ]

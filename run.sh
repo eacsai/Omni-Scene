@@ -108,6 +108,14 @@ python train_360Loc_cylinder_double_volume_pan.py \
     --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan.py" \
     --work-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan"
 
+python train_360Loc_cylinder_double_volume_pan2.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan2.py" \
+    --work-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2"
+
+python train_360Loc_cylinder_double_volume_pan2.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan2.py" \
+    --work-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2_fix"
+
 python train_360Loc_cylinder_double.py \
     --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_all.py" \
     --work-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_All_Volume"
@@ -157,10 +165,10 @@ python evaluate_mp3d_double.py \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_z3" \
     --load-from "checkpoint-21000"
 
-python evaluate_360Loc_double_pixel.py \
+python evaluate_360Loc_double_all.py \
     --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_pixel.py" \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Pixel_Pan" \
-    --load-from "checkpoint-12000"
+    --load-from "checkpoint-3000"
 
 python evaluate_360Loc_double.py \
     --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume.py" \
@@ -170,6 +178,16 @@ python evaluate_360Loc_double.py \
 python evaluate_360Loc_double_all.py \
     --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan.py" \
     --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan" \
+    --load-from "checkpoint-3000"
+
+python evaluate_360Loc_double_all.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan2.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2" \
+    --load-from "checkpoint-3000"
+
+python evaluate_360Loc_double_Pan2.py \
+    --py-config "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan2.py" \
+    --output-dir "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2_fix" \
     --load-from "checkpoint-3000"
 
 python evaluate_360Loc_double.py \
