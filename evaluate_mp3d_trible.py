@@ -1,7 +1,7 @@
 
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -20,9 +20,8 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration
 from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc, compute_absrel
 from tools.visualization import depths_to_colors
-from safetensors.torch import load_file
 
-from data.mp3d_dataloader import load_MP3D_data
+from data.mp3d_dataloader_trible import load_MP3D_data
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -118,17 +117,11 @@ def main(args):
         path = None
 
     if path:
-        full_path = os.path.join(args.output_dir, path, 'model.safetensors')
-        accelerator.print(f"Resuming from checkpoint {full_path}")
-        state_dict = load_file(full_path, device="cpu")
-        model_dict = my_model.state_dict()
-
-        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
-        model_dict.update(filtered_dict)
-        my_model.load_state_dict(model_dict)
+        path = os.path.join(args.output_dir, path)
+        accelerator.print(f"Loading from checkpoint {path}")
+        accelerator.load_state(path, map_location='cpu', strict=False)
         global_iter = int(path.split("-")[1])
         print(f'Successfully loaded from iter{global_iter}')
-
     else:
         print('Can\'t find checkpoint {}. Randomly initialize model parameters anyway.'.format(args.load_from))
     
@@ -222,13 +215,15 @@ def main(args):
                     # save visualization results
                     v_pred_imgs = pred_imgs[b]
                     v_pred_depths = pred_depths[b].clamp(0.0, 140.0)
+                    v_gt_depths = gt_depths[b].clamp(0.0, 140.0)
                     v_gt_imgs = gt_imgs[b]
                     cat_img_gt = rearrange(v_gt_imgs, "v c h w -> c h (v w)")
                     cat_img_pred = rearrange(v_pred_imgs, "v c h w -> c h (v w)")
                     grid_img = torch.cat([cat_img_gt, cat_img_pred], dim=1)
                     grid_img = (grid_img.permute(1, 2, 0).detach().cpu().numpy().clip(0, 1) * 255.0).astype(np.uint8)
                     grid_depth = depths_to_colors(v_pred_depths)
-                    grid_all = np.concatenate([grid_img, grid_depth], axis=0)
+                    gt_depth = depths_to_colors(v_gt_depths.squeeze(1))
+                    grid_all = np.concatenate([grid_img, grid_depth, gt_depth], axis=0)
                     imageio.imwrite(osp.join(output_dir, "Batch_{}_Sampe_{}_Scene_{}.png".format(i_iter, b, batch['scene'][b])), grid_all)
         
         torch.cuda.empty_cache()

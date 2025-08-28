@@ -18,8 +18,9 @@ import logging
 from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
+from safetensors.torch import load_file
 
-from data.mp3d_dataloader import load_MP3D_data
+from data.mp3d_dataloader_trible import load_MP3D_data
 # from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
@@ -142,6 +143,14 @@ def main(args):
 
     train_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='train')
     val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='val')
+    
+    path = cfg.resume_from
+    # if path:
+    #     accelerator.print(f"Resuming from checkpoint {path}")
+    #     state_dict = load_file(path, device="cpu")
+    #     my_model.load_state_dict(state_dict)
+    #     accelerator.print("Model weights loaded successfully before prepare().")
+    
     my_model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
         my_model, optimizer, train_dataloader, val_dataloader, scheduler
     )
@@ -153,23 +162,7 @@ def main(args):
     epoch = 0
     global_iter = 0
     first_epoch = 0
-
-    # Potentially load in the weights and states from a previous save
-    if args.resume_from:
-        cfg.resume_from = args.resume_from
-    if cfg.resume_from:
-        if cfg.resume_from != "latest":
-            path = os.path.basename(cfg.resume_from)
-        else:
-            # Get the most recent checkpoint
-            dirs = os.listdir(cfg.work_dir)
-            dirs = [d for d in dirs if d.startswith("checkpoint")]
-            if len(dirs) > 0:
-                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                path = dirs[-1]
-            else:
-                path = None
-
+    
     # if path:
     #     accelerator.print(f"Resuming from checkpoint {path}")
     #     accelerator.load_state(osp.join(cfg.work_dir, path), map_location='cpu', strict=False)
@@ -179,7 +172,7 @@ def main(args):
     #     print(f'successfully resumed from epoch{first_epoch}-iter{global_iter}')
     # else:
     #     resume_step = -1
-    
+
     print('work dir: ', args.work_dir)
     
     # training
@@ -189,7 +182,7 @@ def main(args):
         my_model.train()
         data_time_s = time.time()
         time_s = time.time()
-        for i_iter, batch in enumerate(val_dataloader):
+        for i_iter, batch in enumerate(train_dataloader):
             # forward + backward + optimize
             data_time_e = time.time()
             with accelerator.accumulate(my_model):
@@ -206,6 +199,26 @@ def main(args):
             
             # Checks if the accelerator has performed an optimization step behind the scenes
             accelerator.wait_for_everyone()
+            if accelerator.sync_gradients and accelerator.is_main_process:
+                if global_iter > 0 and global_iter % cfg.save_freq == 0:
+                    if accelerator.is_main_process:
+                        save_file_name = os.path.join(os.path.abspath(args.work_dir), f'checkpoint-{global_iter}')
+                        accelerator.save_state(save_file_name)
+                        dst_file = osp.join(args.work_dir, 'latest')
+                        mmengine.utils.symlink(save_file_name, dst_file)
+                        if logger is not None:
+                            logger.info('[TRAIN] Save latest state dict to {}.'.format(save_file_name))
+                
+                if global_iter > 0 and global_iter % cfg.val_freq == 0:
+                    my_model.eval()
+                    if accelerator.is_main_process:
+                        for i_iter_val, batch_val in enumerate(val_dataloader):
+                            val_batch_save_dir = osp.join(cfg.output_dir, cfg.exp_name, "validation",
+                                                "step-{}/batch-{}".format(global_iter, i_iter_val))
+                            log_val = my_model.validation_step(batch_val, val_batch_save_dir)
+                            # log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
+                            log.update(log_val)
+                    my_model.train()
             
             time_e = time.time()
 

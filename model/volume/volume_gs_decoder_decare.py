@@ -2,33 +2,59 @@
 import torch, torch.nn as nn, torch.nn.functional as F
 from mmengine.model import BaseModule
 from mmengine.registry import MODELS
-from sample_anchors import sample_concentrating_sphere, project_onto_planes
-import math
 from vis_feat import single_features_to_RGB
-from simple_knn._C import distCUDA2
 
 def sigmoid_scaling(scaling:torch.Tensor, lower_bound=0.005, upper_bound=0.02):
     sig = torch.sigmoid(scaling)
     return lower_bound * (1 - sig) + upper_bound * sig
 
+def vis_sample_points(pixel_locs, depths, W, H):    # 4. 准备绘图数据 (将PyTorch张量转为NumPy数组)
+    u = pixel_locs[:, 0].detach().cpu().numpy()
+    v = pixel_locs[:, 1].detach().cpu().numpy()
+    d = depths.detach().cpu().numpy().flatten()
+
+    # 5. 使用 matplotlib 进行可视化
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    scatter = ax.scatter(u, v, c=d, cmap='viridis', s=5, alpha=0.8)
+
+    # 添加颜色条
+    cbar = fig.colorbar(scatter, ax=ax)
+    cbar.set_label('深度 (Depth)')
+
+    # 设置坐标轴和标题
+    ax.set_title('球形投影可视化 (Spherical Projection Visualization)')
+    ax.set_xlabel('u 坐标 (来自方位角 Theta)')
+    ax.set_ylabel('v 坐标 (来自俯仰角 Phi)')
+    ax.set_xlim(0, W)
+    # 反转y轴，使(0,0)在左上角，符合图像坐标习惯
+    ax.set_ylim(H, 0) 
+    ax.set_aspect('equal', adjustable='box') # 保持图像比例
+    ax.grid(True, linestyle='--', alpha=0.3)
+
+    plt.savefig('spherical_projection_visualization.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+
 @MODELS.register_module()
-class VolumeGaussianDecoderConf(BaseModule):
+class VolumeGaussianDecoderDecare(BaseModule):
     def __init__(
-        self, tpv_theta, tpv_r, tpv_z, pc_range, gs_dim=14,
+        self, tpv_h, tpv_w, tpv_z, pc_range, gs_dim=14,
         in_dims=64, hidden_dims=128, out_dims=None,
-        scale_theta=2, scale_r=2, scale_z=2, gpv=4, offset_max=None, scale_max=None,
+        scale_h=2, scale_w=2, scale_z=2, gpv=4, offset_max=None, scale_max=None,
         use_checkpoint=False
     ):
         super().__init__()
-        self.tpv_theta = tpv_theta
-        self.tpv_r = tpv_r
+        self.tpv_h = tpv_h
+        self.tpv_w = tpv_w
         self.tpv_z = tpv_z
         self.pc_range = pc_range
-        self.scale_theta = scale_theta
-        self.scale_r = scale_r
+        self.scale_h = scale_h
+        self.scale_w = scale_w
         self.scale_z = scale_z
         self.gpv = gpv
-        self.pc_depth = math.sqrt(pc_range[0]**2 + pc_range[1]**2 + pc_range[2]**2)
+
         out_dims = in_dims if out_dims is None else out_dims
 
         self.decoder = nn.Sequential(
@@ -43,18 +69,17 @@ class VolumeGaussianDecoderConf(BaseModule):
         # set activations
         # TODO check if optimal
         self.pos_act = lambda x: torch.tanh(x)
-        if offset_max is None:
-            self.offset_max = [1.0] * 3 # meters
-        else:
-            self.offset_max = offset_max
-        # self.offset_max = [1.0] * 3
+        # if offset_max is None:
+        #     self.offset_max = [1.0] * 3 # meters
+        # else:
+        #     self.offset_max = offset_max
+        self.offset_max = [1.0] * 3
         #self.scale_act = lambda x: sigmoid_scaling(x, lower_bound=0.005, upper_bound=0.02)
-        if scale_max is None:
-            self.scale_max = [1.0] * 3 # meters
-        else:
-            self.scale_max = scale_max
-        # self.scale_max = [1.0] * 3
-
+        # if scale_max is None:
+        #     self.scale_max = [1.0] * 3 # meters
+        # else:
+        #     self.scale_max = scale_max
+        self.scale_max = [1.0] * 3 
         self.scale_act = lambda x: torch.sigmoid(x)
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
@@ -66,38 +91,92 @@ class VolumeGaussianDecoderConf(BaseModule):
             nn.LeakyReLU(),
             nn.Linear(128, 3, bias=True),
         )
-
-
-        # obtain anchor points for gaussians        
-        # r = torch.linspace(0.5, self.tpv_z-0.5, self.tpv_z, device='cuda')
-        # anchors_coordinates = sample_concentrating_sphere(r, 2000, threshold=3.0, device='cuda') # [N_radii * n_samples, 3]
-        gs_anchors = self.get_panorama_reference_points(tpv_r, tpv_theta, tpv_z, pc_range) # 1, w, h, z, 3
-        # gs_anchors = self.get_sample_reference_points(anchors_coordinates, pc_range[5] - pc_range[2]) # [num_points, 1, 3]
-        # mask_lower = gs_anchors[:, 0, 1] >= -2.5
-        # mask_upper = gs_anchors[:, 0, 1] <= 2.5
-        # combined_mask = torch.logical_and(mask_lower, mask_upper)
-        # anchors_dist = torch.clamp_min(distCUDA2(gs_anchors.view(-1,3)).float().cuda(), 0.0000001)
-        # self.offset_max = [anchors_dist.max()] * 3
-        # self.scale_max = [anchors_dist.max()] * 3
+        # obtain anchor points for gaussians
+        gs_anchors = self.get_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
+        # gs_anchors = self.get_panorama_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
 
         self.register_buffer('gs_anchors', gs_anchors)
-        # self.register_buffer('anchors_coordinates', anchors_coordinates[combined_mask])
 
     def normalize(self, pixel_locations, h, w):
         resize_factor = torch.tensor([w-1., h-1.]).to(pixel_locations.device)[None, None, None, :]
         normalized_pixel_locations = 2 * pixel_locations / resize_factor - 1.  # [n_views, n_points, 2]
         return normalized_pixel_locations
 
-    def generate_window_grid(self, h_min, h_max, w_min, w_max, len_h, len_w, device=None):
-        assert device is not None
-
+    def generate_window_grid(self, h_min, h_max, w_min, w_max, len_h, len_w, device):
         x, y = torch.meshgrid([torch.linspace(w_min, w_max, len_w, device=device),
                             torch.linspace(h_min, h_max, len_h, device=device)],
                             )
         grid = torch.stack((x, y), -1).transpose(0, 1).float()  # [H, W, 2]
 
         return grid
+    
+    @staticmethod
+    def get_reference_points(H, W, Z, pc_range, dim='3d', bs=1, device='cuda', dtype=torch.float):
+        """Get the reference points used in spatial cross-attn and self-attn.
+        Args:
+            H, W: spatial shape of tpv plane.
+            Z: hight of pillar.
+            D: sample D points uniformly from each pillar.
+            device (obj:`device`): The device where
+                reference_points should be.
+        Returns:
+            Tensor: reference points used in decoder, has \
+                shape (bs, num_keys, num_levels, 2).
+        """
 
+        # reference points in 3D space
+        zs = torch.linspace(0.5, Z - 0.5, Z, dtype=dtype,
+                            device=device).view(-1, 1, 1).expand(Z, H, W) / Z
+        xs = torch.linspace(0.5, W - 0.5, W, dtype=dtype,
+                            device=device).view(1, 1, -1).expand(Z, H, W) / W
+        ys = torch.linspace(0.5, H - 0.5, H, dtype=dtype,
+                            device=device).view(1, -1, 1).expand(Z, H, W) / H
+        ref_3d = torch.stack((xs, ys, zs), -1)
+        ref_3d = ref_3d.permute(2, 1, 0, 3) # w, h, z, 3
+        ref_3d[..., 0:1] = ref_3d[..., 0:1] * (pc_range[3] - pc_range[0]) + pc_range[0]
+        ref_3d[..., 1:2] = ref_3d[..., 1:2] * (pc_range[4] - pc_range[1]) + pc_range[1]
+        ref_3d[..., 2:3] = ref_3d[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
+        ref_3d = ref_3d[None].repeat(bs, 1, 1, 1, 1) # b, w, h, z, 3
+        return ref_3d
+    def get_offsets_reference_points(
+            self, 
+            X, 
+            Y, 
+            Z, 
+            offset_X, 
+            offset_Y, 
+            offset_Z,
+            delta_X,
+            delta_Y,
+            delta_Z, 
+            pc_range, 
+            dim='3d', 
+            bs=1, 
+            device='cuda', 
+            dtype=torch.float,
+        ):
+        """Get the reference points used in spatial cross-attn and self-attn.
+        Returns:
+            Tensor: reference points used in decoder, has \
+                shape (bs, num_keys, num_levels, 2).
+        """
+
+        # 1. 计算步长 (弧度)
+        delta_x = (pc_range[3] - pc_range[0]) * delta_X / X
+        delta_y = (pc_range[4] - pc_range[1]) * delta_Y / Y
+        delta_z = (pc_range[5] - pc_range[2]) * delta_Z / Z  # 修改: 计算 delta_z
+
+        # reference points in 3D space
+        xs = (pc_range[3] - pc_range[0]) * torch.linspace(0, X, X+1, dtype=dtype,
+                            device=device)[:-1].view(-1, 1, 1).expand(X, Y, Z)[None,:,:,:,None,None] / X + pc_range[0] + offset_X 
+        ys = (pc_range[4] - pc_range[1]) * torch.linspace(0, Y, Y+1, dtype=dtype,
+                            device=device)[:-1].view(1, -1, 1).expand(X, Y, Z)[None,:,:,:,None,None] / Y + pc_range[1] + offset_Y
+        zs = (pc_range[5] - pc_range[2]) * torch.linspace(0, Z, Z+1, dtype=dtype,
+                            device=device)[:-1].view(1, 1, -1).expand(X, Y, Z)[None,:,:,:,None,None] / Z + pc_range[2] + offset_Z
+
+        ref_3d = torch.cat((xs, ys, zs), -1)
+        scale_3d = torch.cat((delta_x, delta_y, delta_z), -1) * 1.01
+        return ref_3d, scale_3d
 
     def get_panorama_color(
             self,
@@ -188,89 +267,34 @@ class VolumeGaussianDecoderConf(BaseModule):
         color = self.gaussian_to_color(sampled_feat) # [bs, num_points, 3]
 
         return color
-    
 
-    @staticmethod
-    def get_panorama_reference_points(R, Theta, Phi, pc_range, dim='3d', bs=1, device='cuda', dtype=torch.float):
-        """Get the reference points used in spatial cross-attn and self-attn.
-        Args:
-            H, W: spatial shape of tpv plane.
-            Z: hight of pillar.
-            D: sample D points uniformly from each pillar.
-            device (obj:`device`): The device where
-                reference_points should be.
-        Returns:
-            Tensor: reference points used in decoder, has \
-                shape (bs, num_keys, num_levels, 2).
-        """
 
-        # reference points in 3D space
-        rs = (pc_range[3] - pc_range[0]) * torch.linspace(0, R, R+1, dtype=dtype,
-                            device=device)[:-1].view(-1, 1, 1).expand(R, Theta, Phi) / R  + pc_range[0]
-        thetas = 2 * torch.pi * torch.linspace(0, Theta, Theta+1, dtype=dtype,
-                            device=device)[:-1].view(1, -1, 1).expand(R, Theta, Phi) / Theta
-        phis = torch.pi * torch.linspace(0, Phi, Phi+1, dtype=dtype,
-                            device=device)[:-1].view(1, 1, -1).expand(R, Theta, Phi) / Phi
-        
-        xs = -torch.sin(phis) * torch.sin(thetas) * rs
-        ys = -torch.cos(phis) * rs
-        zs = -torch.sin(phis) * torch.cos(thetas) * rs
-
-        ref_3d = torch.stack((xs, ys, zs), -1)
-        # ref_3d[..., 0:1] = ref_3d[..., 0:1] * (pc_range[3] - pc_range[0]) + pc_range[0]
-        # ref_3d[..., 1:2] = ref_3d[..., 1:2] * (pc_range[4] - pc_range[1]) + pc_range[1]
-        # ref_3d[..., 2:3] = ref_3d[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
-        ref_3d = ref_3d[None].repeat(bs, 1, 1, 1, 1) # b, w, h, z, 3
-        return ref_3d
-    
-    @staticmethod
-    def get_sample_reference_points(anchors_coordinates, range_r, dtype=torch.float):
-        """Get the reference points used in spatial cross-attn and self-attn.
-        Args:
-            H, W: spatial shape of tpv plane.
-            Z: hight of pillar.
-            D: sample D points uniformly from each pillar.
-            device (obj:`device`): The device where
-                reference_points should be.
-        Returns:
-            Tensor: reference points used in decoder, has \
-                shape (bs, num_keys, num_levels, 2).
-        """
-
-        # reference points in 3D space
-        thetas = 2 * torch.pi * (anchors_coordinates[..., 0:1] + 1.0) / 2
-        phis = torch.pi * (anchors_coordinates[..., 1:2] + 1.0) / 2
-        rs = range_r * (anchors_coordinates[..., 2:3] + 1.0) / 2
-        xs = -torch.sin(phis) * torch.sin(thetas) * rs
-        ys = -torch.cos(phis) * rs
-        zs = -torch.sin(phis) * torch.cos(thetas) * rs
-
-        ref_3d = torch.stack((xs, ys, zs), -1) # [num_points, 1, 3]
-
-        return ref_3d
-    
     def forward(self, tpv_list, img_color, img_depth, img_metas, debug=False):
         """
         tpv_list[0]: bs, h*w, c
         tpv_list[1]: bs, z*h, c
         tpv_list[2]: bs, w*z, c
         """
-        tpv_thetar, tpv_ztheta, tpv_rz = tpv_list[0], tpv_list[1], tpv_list[2]
-        bs, _, c = tpv_thetar.shape
+        tpv_hw, tpv_zh, tpv_wz = tpv_list[0], tpv_list[1], tpv_list[2]
+        bs, _, c = tpv_hw.shape
+        tpv_hw = tpv_hw.permute(0, 2, 1).reshape(bs, c, self.tpv_h, self.tpv_w)
+        tpv_zh = tpv_zh.permute(0, 2, 1).reshape(bs, c, self.tpv_z, self.tpv_h)
+        tpv_wz = tpv_wz.permute(0, 2, 1).reshape(bs, c, self.tpv_w, self.tpv_z)
 
-        tpv_thetar = tpv_thetar.permute(0, 2, 1).reshape(bs, c, self.tpv_theta, self.tpv_r) # [theta, phi]
-        tpv_ztheta = tpv_ztheta.permute(0, 2, 1).reshape(bs, c, self.tpv_z, self.tpv_theta) # [phi, r]
-        tpv_rz = tpv_rz.permute(0, 2, 1).reshape(bs, c, self.tpv_r, self.tpv_z) # [r, theta]
+        # single_features_to_RGB(tpv_hw, img_name='feat_hw.png')
+        # single_features_to_RGB(tpv_zh, img_name='feat_zh.png')
+        # single_features_to_RGB(tpv_wz, img_name='feat_wz.png')
 
-        # #print("before voxelize:{}".format(torch.cuda.memory_allocated(0)))
-        tpv_thetar = tpv_thetar.unsqueeze(-1).permute(0, 1, 3, 2, 4).expand(-1, -1, -1, -1, self.scale_z*self.tpv_z)
-        tpv_ztheta = tpv_ztheta.unsqueeze(-1).permute(0, 1, 4, 3, 2).expand(-1, -1, self.scale_r*self.tpv_r, -1, -1)
-        tpv_rz = tpv_rz.unsqueeze(-1).permute(0, 1, 2, 4, 3).expand(-1, -1, -1, self.scale_theta*self.tpv_theta, -1)
+        #print("before voxelize:{}".format(torch.cuda.memory_allocated(0)))
+        tpv_hw = tpv_hw.unsqueeze(-1).permute(0, 1, 3, 2, 4).expand(-1, -1, -1, -1, self.tpv_z)
+        tpv_zh = tpv_zh.unsqueeze(-1).permute(0, 1, 4, 3, 2).expand(-1, -1, self.tpv_w, -1, -1)
+        tpv_wz = tpv_wz.unsqueeze(-1).permute(0, 1, 2, 4, 3).expand(-1, -1, -1, self.tpv_h, -1)
 
-        gaussians = tpv_thetar + tpv_ztheta + tpv_rz
+        gaussians = tpv_hw + tpv_zh + tpv_wz
         #print("after voxelize:{}".format(torch.cuda.memory_allocated(0)))
         gaussians = gaussians.permute(0, 2, 3, 4, 1) # bs, w, h, z, c
         bs, w, h, z, _ = gaussians.shape
+
 
         if self.use_checkpoint:
             gaussians = torch.utils.checkpoint.checkpoint(self.decoder, gaussians, use_reentrant=False)
@@ -283,11 +307,32 @@ class VolumeGaussianDecoderConf(BaseModule):
             # gaussians = gaussians.view(bs, num_points, self.gpv, -1)
             gaussians = gaussians.view(bs, w, h, z, self.gpv, -1)
         #print("after decode:{}".format(torch.cuda.memory_allocated(0)))
-        gs_offsets_x = self.pos_act(gaussians[..., :1]) * self.offset_max[0] # bs, w, h, z, 3
-        gs_offsets_y = self.pos_act(gaussians[..., 1:2]) * self.offset_max[1] # bs, w, h, z, 3
-        gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.offset_max[2] # bs, w, h, z, 3
+        # gs_offsets_x = self.pos_act(gaussians[..., :1]) * self.scale_cylinder[None, ..., None, :1] # bs, w, h, z, 3
+        # gs_offsets_y = self.pos_act(gaussians[..., 1:2]) * self.scale_cylinder[None, ..., None, 1:2] # bs, w, h, z, 3
+        # gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.scale_cylinder[None, ..., None, 2:3] # bs, w, h, z, 3
+        
+        # gs_offsets_x = self.pos_act(gaussians[..., :1]) # bs, w, h, z, 3
+        # gs_offsets_y = self.pos_act(gaussians[..., 1:2]) # bs, w, h, z, 3
+        # gs_offsets_z = self.pos_act(gaussians[..., 2:3]) # bs, w, h, z, 3
+
+        gs_offsets_x = self.pos_act(gaussians[..., :1]) * self.offset_max[0] # r
+        gs_offsets_y = self.pos_act(gaussians[..., 1:2]) * self.offset_max[1] # theta
+        gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.offset_max[2] # z
+
+        scale_x = self.scale_act(gaussians[..., 3:4])
+        scale_y = self.scale_act(gaussians[..., 4:5])
+        scale_z = self.scale_act(gaussians[..., 5:6])
+
         #gs_offsets = gaussians[..., :3]
-        gs_positions = torch.cat([gs_offsets_x, gs_offsets_y, gs_offsets_z], dim=-1) + self.gs_anchors[:, :, :, :, None, :]
+        gs_positions, scale_3d = self.get_offsets_reference_points(
+            self.tpv_w, 
+            self.tpv_h, 
+            self.tpv_z, 
+            gs_offsets_x, gs_offsets_y, gs_offsets_z,
+            scale_x, scale_y, scale_z, 
+            self.pc_range, bs=bs, device=gaussians.device
+        )
+        # gs_positions = torch.cat([gs_offsets_x, gs_offsets_y, gs_offsets_z], dim=-1) + self.gs_anchors[:, :, :, :, None, :]
         color = self.get_panorama_color(
             gs_positions.view(bs, -1, 3),
             img_color,
@@ -295,12 +340,24 @@ class VolumeGaussianDecoderConf(BaseModule):
             img_metas
         )
         rgbs = color.view(bs, w, h, z, self.gpv, 3) # bs, w, h, z, gpv, 3
-        x = torch.cat([gs_positions, rgbs, gaussians[..., 6:]], dim=-1)
-        opacity = self.opacity_act(x[..., 6:7])
-        rotation = self.rot_act(x[..., 7:11])
-        scale_x = self.scale_act(x[..., 11:12]) * self.scale_max[0]
-        scale_y = self.scale_act(x[..., 12:13]) * self.scale_max[1]
-        scale_z = self.scale_act(x[..., 13:14]) * self.scale_max[2]
+        x = torch.cat([gs_positions, scale_3d, rgbs, gaussians[..., 9:]], dim=-1)
+        rgbs = self.rgb_act(x[..., 6:9])
+        opacity = self.opacity_act(x[..., 9:10])
+        rotation = self.rot_act(x[..., 10:14])
 
-        gaussians = torch.cat([gs_positions, rgbs, opacity, rotation, scale_x, scale_y, scale_z], dim=-1) # bs, w, h, z, gpv, 14
+        # scale_x = self.scale_act(x[..., 11:12])
+        # scale_y = self.scale_act(x[..., 12:13])
+        # scale_z = self.scale_act(x[..., 13:14])
+
+        if debug:
+            opacity[:] = 1.0
+            scale_x[:] = 0.5
+            scale_y[:] = 0.5
+            scale_z[:] = 0.5
+            rgbs[..., 0] = 1.0
+            rgbs[..., 1] = 0.0
+            rgbs[..., 2] = 0.0
+
+        gaussians = torch.cat([gs_positions, rgbs, opacity, rotation, scale_3d], dim=-1) # bs, w, h, z, gpv, 14
+    
         return gaussians

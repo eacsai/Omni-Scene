@@ -32,14 +32,14 @@ w2w = torch.tensor([  #  X -> X, Z -> Y, Y -> -Z
     [0, 0, 0, 1],
 ]).float()
 
-def two_sample(scene, extrinsics, stage="train", i=0):
+def two_sample(scene, extrinsics, times_per_scene, stage="train", i=0):
     num_views, _, _ = extrinsics.shape
     # Compute the context view spacing based on the current global step.
     if stage == "val":
         # When testing, always use the full gap.
         min_gap = max_gap = 3
     else:
-        min_gap = max_gap = 3
+        min_gap = max_gap = 2
     max_gap = min(num_views - 1, min_gap)
 
     # Pick the gap between the context views.
@@ -55,7 +55,7 @@ def two_sample(scene, extrinsics, stage="train", i=0):
     # Pick the left and right context indices.
 
     if stage == "val":
-        index_context_left = (num_views - context_gap - 1) * i / max((100 - 1), 1)
+        index_context_left = (num_views - context_gap - 1) * i / max((times_per_scene - 1), 1)
         index_context_left = int(index_context_left)
     else:
         index_context_left = torch.randint(
@@ -121,11 +121,12 @@ class Dataset360Loc(IterableDataset):
         root = Path('/data/qiwei/nips25/360Loc')
         self.data = []
         for location in locations:
-            seqs = [list((root / location / folder).glob('daytime_360*/')) for folder in ('mapping', 'query_360')]
+            seqs = [list((root / location / folder).glob('*360*/')) for folder in ('mapping', 'query_360')]
+            # seqs = [list((root / location / folder).glob('daytime_360*/')) for folder in ('mapping', 'query_360')]
             seqs = sum(seqs, [])
             self.data.extend(seqs)
 
-        self.times_per_scene = 1000 if self.stage == "train" else 100
+        self.times_per_scene = 1000 if self.stage == "train" else 10
         self.load_images = True
         self.direction = get_panorama_ray_directions(self.height, self.width)
 
@@ -173,6 +174,7 @@ class Dataset360Loc(IterableDataset):
                 context_indices, target_indices = two_sample(
                     scene,
                     extrinsics_orig,
+                    self.times_per_scene,
                     stage=self.stage,
                     i=i,
                 )

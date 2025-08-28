@@ -1,6 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -18,6 +18,7 @@ import logging
 from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
+from safetensors.torch import load_file
 
 from data.mp3d_dataloader_double import load_MP3D_data
 # from data.mp3d_dataloader_double import load_MP3D_data
@@ -142,6 +143,18 @@ def main(args):
 
     train_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='train')
     val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='val')
+    
+    path = cfg.resume_from
+    if path:
+        accelerator.print(f"Resuming from checkpoint {path}")
+        state_dict = load_file(path, device="cpu")
+        model_dict = my_model.state_dict()
+
+        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        model_dict.update(filtered_dict)
+        my_model.load_state_dict(model_dict)
+        accelerator.print("Model weights loaded successfully before prepare().")
+    
     my_model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
         my_model, optimizer, train_dataloader, val_dataloader, scheduler
     )
@@ -153,36 +166,11 @@ def main(args):
     epoch = 0
     global_iter = 0
     first_epoch = 0
-
-    # Potentially load in the weights and states from a previous save
-    if args.resume_from:
-        cfg.resume_from = args.resume_from
-    if cfg.resume_from:
-        if cfg.resume_from != "latest":
-            path = os.path.basename(cfg.resume_from)
-        else:
-            # Get the most recent checkpoint
-            dirs = os.listdir(cfg.work_dir)
-            dirs = [d for d in dirs if d.startswith("checkpoint")]
-            if len(dirs) > 0:
-                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                path = dirs[-1]
-            else:
-                path = None
-
-    # if path:
-    #     accelerator.print(f"Resuming from checkpoint {path}")
-    #     accelerator.load_state(osp.join(cfg.work_dir, path), map_location='cpu', strict=False)
-    #     global_iter = int(path.split("-")[1])
-    #     first_epoch = global_iter // num_update_steps_per_epoch
-    #     resume_step = global_iter % num_update_steps_per_epoch
-    #     print(f'successfully resumed from epoch{first_epoch}-iter{global_iter}')
-    # else:
-    #     resume_step = -1
     
     print('work dir: ', args.work_dir)
     
     # training
+    # torch.autograd.set_detect_anomaly(True)
     print_freq = cfg.print_freq
 
     while epoch < max_num_epochs:

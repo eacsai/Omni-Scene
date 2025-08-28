@@ -175,13 +175,13 @@ def main(args):
                     i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
             output_dir = os.path.join(cfg.output_dir, str(global_iter))
             os.makedirs(output_dir, exist_ok=True)
-            if cfg.eval_args.save_ply:
-                for b in range(bs):
-                    gaussians = pred_gaussians[b]
-                    ply_path = osp.join(output_dir, "Batch_{}_Sampe_{}.ply".format(i_iter, b))
-                    if not osp.exists(osp.dirname(ply_path)):
-                        os.makedirs(osp.dirname(ply_path))
-                    save_ply(gaussians, ply_path, crop_range=None)
+            # if cfg.eval_args.save_ply:
+            #     for b in range(bs):
+            #         gaussians = pred_gaussians[b]
+            #         ply_path = osp.join(output_dir, "Batch_{}_Sampe_{}.ply".format(i_iter, b))
+            #         if not osp.exists(osp.dirname(ply_path)):
+            #             os.makedirs(osp.dirname(ply_path))
+            #         save_ply(gaussians, ply_path, crop_range=None)
             if cfg.eval_args.save_vis:
                 for b in range(bs):
                     # get psnr for this batch sample

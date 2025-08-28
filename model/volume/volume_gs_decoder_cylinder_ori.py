@@ -41,7 +41,7 @@ def vis_sample_points(pixel_locs, depths, W, H):    # 4. 准备绘图数据 (将
     plt.close()
 
 @MODELS.register_module()
-class VolumeGaussianDecoderCylinder(BaseModule):
+class VolumeGaussianDecoderCylinderOri(BaseModule):
     def __init__(
         self, tpv_theta, tpv_r, tpv_z, pc_range, gs_dim=14,
         in_dims=64, hidden_dims=128, out_dims=None,
@@ -53,6 +53,9 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         self.tpv_r = tpv_r
         self.tpv_z = tpv_z
         self.pc_range = pc_range
+        self.scale_theta = scale_theta
+        self.scale_r = scale_r
+        self.scale_z = scale_z
         self.gpv = gpv
         self.pc_depth = math.sqrt(pc_range[0]**2 + pc_range[1]**2 + pc_range[2]**2)
         out_dims = in_dims if out_dims is None else out_dims
@@ -74,27 +77,34 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         # else:
         #     self.offset_max = offset_max
         self.offset_max = [(pc_range[3] - pc_range[0])/tpv_r, 2*torch.pi/tpv_theta, (pc_range[5] - pc_range[2])/tpv_z] # r, theta, z
+        #self.scale_act = lambda x: sigmoid_scaling(x, lower_bound=0.005, upper_bound=0.02)
+        # if scale_max is None:
+        #     self.scale_max = [1.0] * 3 # meters
+        # else:
+        #     self.scale_max = scale_max
+        self.scale_max = [1.0] * 3 
         self.scale_act = lambda x: torch.sigmoid(x)
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = lambda x: torch.sigmoid(x)
-        self.view_feature_processor = nn.Sequential(
-            # [N, 7, 3, 3] -> [N, 64, 1, 1]
-            nn.Conv2d(in_channels=7, out_channels=64, kernel_size=3, padding=0),
-            nn.LeakyReLU(),
-        )
-
         self.gaussian_to_color = nn.Sequential(
-            nn.Linear(64, 64, bias=True),
+            nn.Linear(72, 128, bias=True),
             nn.LeakyReLU(),
-            nn.Linear(64, 3, bias=True),
-            nn.Sigmoid()
+            nn.Linear(128, 128, bias=True),
+            nn.LeakyReLU(),
+            nn.Linear(128, 3, bias=True),
         )
 
         # obtain anchor points for gaussians        
         # r = torch.linspace(0.5, self.tpv_z-0.5, self.tpv_z, device='cuda')
         # anchors_coordinates = sample_concentrating_sphere(r, 2000, threshold=3.0, device='cuda') # [N_radii * n_samples, 3]
+        gs_anchors = self.get_panorama_reference_points(tpv_theta * scale_theta, tpv_r * scale_r, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
         scale_cylinder = self.get_scale_cylinder(tpv_theta * scale_theta, tpv_r * scale_r, tpv_z * scale_z, pc_range[0], pc_range[3], pc_range[2], pc_range[5])
+        # gs_anchors = self.get_sample_reference_points(anchors_coordinates, pc_range[5] - pc_range[2]) # [num_points, 1, 3]
+        # mask_lower = gs_anchors[:, 0, 1] >= -2.5
+        # mask_upper = gs_anchors[:, 0, 1] <= 2.5
+        # combined_mask = torch.logical_and(mask_lower, mask_upper)
+        self.register_buffer('gs_anchors', gs_anchors)
         self.register_buffer('scale_cylinder', scale_cylinder)
         # self.register_buffer('anchors_coordinates', anchors_coordinates[combined_mask])
 
@@ -162,6 +172,40 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         scales = torch.stack([delta_x / 2, delta_y_values / 2, delta_z / 2], dim=-1) * 1.01
         
         return scales
+
+    @staticmethod
+    def get_panorama_reference_points(THETA, R, Z, pc_range, dim='3d', bs=1, device='cuda', dtype=torch.float):
+        """Get the reference points used in spatial cross-attn and self-attn.
+        Args:
+            THETA, R: spatial shape of tpv plane.
+            Z: hight of pillar.
+            D: sample D points uniformly from each pillar.
+            device (obj:`device`): The device where
+                reference_points should be.
+        Returns:
+            Tensor: reference points used in decoder, has \
+                shape (bs, num_keys, num_levels, 2).
+        """
+
+        # reference points in 3D space
+        rs = (pc_range[3] - pc_range[0]) * torch.linspace(0, R, R+1, dtype=dtype,
+                            device=device)[:-1].view(1, 1, -1).expand(Z, THETA, R) / R 
+        thetas = 2 * torch.pi * torch.linspace(0, THETA, THETA+1, dtype=dtype,
+                            device=device)[:-1].view(1, -1, 1).expand(Z, THETA, R) / THETA
+        zs = (pc_range[5] - pc_range[2]) * torch.linspace(0, Z, Z+1, dtype=dtype,
+                            device=device)[:-1].view(-1, 1, 1).expand(Z, THETA, R) / Z
+        
+        xs = -torch.sin(thetas) * rs
+        ys = zs + pc_range[2] 
+        zs = -torch.cos(thetas) * rs
+
+        ref_3d = torch.stack((xs, ys, zs), -1)
+        ref_3d = ref_3d.permute(2, 1, 0, 3) # w, h, z, 3
+        # ref_3d[..., 0:1] = ref_3d[..., 0:1] * (pc_range[3] - pc_range[0]) + pc_range[0]
+        # ref_3d[..., 1:2] = ref_3d[..., 1:2] * (pc_range[4] - pc_range[1]) + pc_range[1]
+        # ref_3d[..., 2:3] = ref_3d[..., 2:3] * (pc_range[5] - pc_range[2]) + pc_range[2]
+        ref_3d = ref_3d[None].repeat(bs, 1, 1, 1, 1) # b, w, h, z, 3
+        return ref_3d
     
     def get_offsets_reference_points(self, 
                                      THETA, 
@@ -225,7 +269,6 @@ class VolumeGaussianDecoderCylinder(BaseModule):
     def get_panorama_color(
             self,
             xyz: torch.Tensor,  # [bs, num_points, 3]
-            gs_feat: torch.Tensor, # [bs, num_points, 3]
             source_imgs: torch.Tensor, #[bs, view, c, h, w]
             source_depths: torch.Tensor, # [bs, view, h, w]
             img_metas: list, # list of dicts, each dict contains 'lidar2img' key
@@ -258,7 +301,7 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         z = reference_points[...,2:3]
 
         project_depth = torch.sqrt(x**2 + y**2 + z**2 + eps).squeeze(-1) # [bs, view, num_points]
-        theta = w * (torch.atan2(x, z + eps) + torch.pi)/(2 * torch.pi) # [bs, view, num_points, 1]
+        theta = w * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) # [bs, view, num_points, 1]
         phi = h * (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi # [bs, view, num_points, 1]
         pixel_locations = torch.cat((theta, phi), dim=-1) # [bs, view, num_points, 2]
         # vis_sample_points(pixel_locations[0,0], project_depth[0,0], W=w, H=h)
@@ -302,43 +345,14 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         rgb = rgb_sampled.masked_fill(mask_in_front.unsqueeze(-1)==0, 0) # [bs, view, num_points*local_h*local_w, 3]
         rgb = rgb.view(b,v,-1,local_h*local_w,3).permute(0,2,1,3,4) # [bs, num_points, view, local_h*local_w, 3]
 
-        # add cam feat
-        cam_pos = torch.inverse(source_cams)[..., :3, 3] # [bs, view, 3]
-        ob_view = xyz.unsqueeze(1) - cam_pos.unsqueeze(2) # [bs, view, num_points, 3]
-        ob_view = ob_view.permute(0, 2, 1, 3) # [bs, num_points, view, 3]
-        ob_dist = ob_view.norm(dim=-1, keepdim=True)
-        ob_view = ob_view / (ob_dist + eps)
-        ob_view = ob_view.unsqueeze(-2).repeat(1, 1, 1, local_h*local_w, 1) # [bs, num_points, view, local_h*local_w, 3]
-        
-        # sampled_feat = torch.concat([rgb, visibility_map, ob_view],dim=-1).view(b, -1, v*local_h*local_w*7) # [bs, num_points, view*local_h*local_w*7]
-        # sampled_feat = torch.concat([sampled_feat, gs_feat], dim=-1)
-        # color = self.gaussian_to_color(sampled_feat) # [bs, num_points, 3]
-
-        # 1. 拼接原始採樣特徵
-        # [bs, num_points, view, local_h*local_w, 7]
-        # per_sample_feat = torch.cat([rgb, gs_feat[:,:,None,None,:].repeat(1,1,v,local_h*local_w,1), visibility_map, ob_view], dim=-1)
-        per_sample_feat = torch.cat([rgb, visibility_map, ob_view], dim=-1)
-        # 2. 將特徵送入視角處理器
-        # 輸入: [bs, num_points, v*local_h*local_w, 7]
-        # 輸出: [bs, num_points, v*local_h*local_w, 64]
-        _, n_pts, _, n_samples, c = per_sample_feat.shape
-        per_sample_feat_conv_input = per_sample_feat.view(b * n_pts * v, n_samples, c).permute(0, 2, 1).view(b * n_pts * v, c, local_h, local_w)
-        
-        processed_feat = self.view_feature_processor(per_sample_feat_conv_input)
-        # [b*n_pts*v, 32, 1, 1] -> [b, n_pts, v, 32]
-        processed_feat = processed_feat.view(b, n_pts, v, -1)
-        # 3. 進行聚合 (Aggregation)，這裡使用最大池化
-        # 沿著所有視角和局部窗口採樣點的維度（dim=2）進行 max pooling
-        # [bs, num_points, v, 32] -> [bs, num_points, 32]
-        aggregated_feat = torch.mean(processed_feat, dim=2)
-
-        # # 4. 拼接聚合後的視角特徵和高斯自身的特徵
-        # # [bs, num_points, 32] 和 [bs, num_points, 3] -> [bs, num_points, 35]
-        # final_feat = torch.cat([aggregated_feat, gs_feat], dim=-1)
-
-        # # 5. 送入最終的 MLP 得到顏色
-        # # 輸入維度是固定的 35
-        color = self.gaussian_to_color(aggregated_feat)
+        # cam_pos = torch.inverse(source_cams)[..., :3, 3] # [bs, view, 3]
+        # ob_view = xyz.unsqueeze(1) - cam_pos.unsqueeze(2) # [bs, view, num_points, 3]
+        # ob_view = ob_view.permute(0, 2, 1, 3) # [bs, num_points, view, 3]
+        # ob_dist = ob_view.norm(dim=-1, keepdim=True)
+        # ob_view = ob_view / ob_dist
+        # ob_view = ob_view.unsqueeze(-2).repeat(1, 1, 1, local_h*local_w, 1) # [bs, num_points, view, local_h*local_w, 3]
+        sampled_feat = torch.concat([rgb, visibility_map],dim=-1).view(b, -1, v*local_h*local_w*4) # [bs, num_points, view*local_h*local_w*4]
+        color = self.gaussian_to_color(sampled_feat) # [bs, num_points, 3]
 
         return color
 
@@ -356,9 +370,9 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         tpv_rz = tpv_rz.permute(0, 2, 1).reshape(bs, c, self.tpv_r, self.tpv_z) # [r, theta]
 
         # #print("before voxelize:{}".format(torch.cuda.memory_allocated(0)))
-        tpv_thetar = tpv_thetar.unsqueeze(-1).permute(0, 1, 3, 2, 4).expand(-1, -1, -1, -1, self.tpv_z)
-        tpv_ztheta = tpv_ztheta.unsqueeze(-1).permute(0, 1, 4, 3, 2).expand(-1, -1, self.tpv_r, -1, -1)
-        tpv_rz = tpv_rz.unsqueeze(-1).permute(0, 1, 2, 4, 3).expand(-1, -1, -1, self.tpv_theta, -1)
+        tpv_thetar = tpv_thetar.unsqueeze(-1).permute(0, 1, 3, 2, 4).expand(-1, -1, -1, -1, self.scale_z*self.tpv_z)
+        tpv_ztheta = tpv_ztheta.unsqueeze(-1).permute(0, 1, 4, 3, 2).expand(-1, -1, self.scale_r*self.tpv_r, -1, -1)
+        tpv_rz = tpv_rz.unsqueeze(-1).permute(0, 1, 2, 4, 3).expand(-1, -1, -1, self.scale_theta*self.tpv_theta, -1)
 
         gaussians = tpv_thetar + tpv_ztheta + tpv_rz
         #print("after voxelize:{}".format(torch.cuda.memory_allocated(0)))
@@ -375,27 +389,35 @@ class VolumeGaussianDecoderCylinder(BaseModule):
             gaussians = self.gs_decoder(gaussians)
             # gaussians = gaussians.view(bs, num_points, self.gpv, -1)
             gaussians = gaussians.view(bs, w, h, z, self.gpv, -1)
+        #print("after decode:{}".format(torch.cuda.memory_allocated(0)))
+        # gs_offsets_x = self.pos_act(gaussians[..., :1]) * self.scale_cylinder[None, ..., None, :1] # bs, w, h, z, 3
+        # gs_offsets_y = self.pos_act(gaussians[..., 1:2]) * self.scale_cylinder[None, ..., None, 1:2] # bs, w, h, z, 3
+        # gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.scale_cylinder[None, ..., None, 2:3] # bs, w, h, z, 3
+        
+        # gs_offsets_x = self.pos_act(gaussians[..., :1]) # bs, w, h, z, 3
+        # gs_offsets_y = self.pos_act(gaussians[..., 1:2]) # bs, w, h, z, 3
+        # gs_offsets_z = self.pos_act(gaussians[..., 2:3]) # bs, w, h, z, 3
 
-        gs_offsets_r = self.pos_act(gaussians[..., :1]) * self.offset_max[0] * 2.0 # r
-        gs_offsets_theta = self.pos_act(gaussians[..., 1:2]) * self.offset_max[1] * 2.0 # theta
-        gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.offset_max[2] * 2.0 # z
+        gs_offsets_r = self.pos_act(gaussians[..., :1]) * self.offset_max[0] # r
+        gs_offsets_theta = self.pos_act(gaussians[..., 1:2]) * self.offset_max[1] # theta
+        gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.offset_max[2] # z
 
-        scale_x = self.scale_act(gaussians[..., 3:4]) * 2.0
-        scale_y = self.scale_act(gaussians[..., 4:5]) * 2.0
-        scale_z = self.scale_act(gaussians[..., 5:6]) * 2.0
+        scale_x = self.scale_act(gaussians[..., 3:4])
+        scale_y = self.scale_act(gaussians[..., 4:5])
+        scale_z = self.scale_act(gaussians[..., 5:6])
 
         #gs_offsets = gaussians[..., :3]
         gs_positions, scale_3d = self.get_offsets_reference_points(
-            self.tpv_theta, 
-            self.tpv_r, 
-            self.tpv_z, 
+            self.tpv_theta * self.scale_theta, 
+            self.tpv_r * self.scale_r, 
+            self.tpv_z * self.scale_z, 
             gs_offsets_theta, gs_offsets_r, gs_offsets_z,
             scale_x, scale_y, scale_z, 
             self.pc_range, bs=bs, device=gaussians.device
         )
+        # gs_positions = torch.cat([gs_offsets_x, gs_offsets_y, gs_offsets_z], dim=-1) + self.gs_anchors[:, :, :, :, None, :]
         color = self.get_panorama_color(
             gs_positions.view(bs, -1, 3),
-            gaussians[..., 6:9].view(bs, -1, 3),
             img_color,
             img_depth,
             img_metas
@@ -405,6 +427,19 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         # rgbs = self.rgb_act(x[..., 6:9])
         opacity = self.opacity_act(x[..., 9:10])
         rotation = self.rot_act(x[..., 10:14])
+
+        # scale_x = self.scale_act(x[..., 11:12])
+        # scale_y = self.scale_act(x[..., 12:13])
+        # scale_z = self.scale_act(x[..., 13:14])
+
+        if debug:
+            opacity[:] = 1.0
+            scale_x[:] = 0.5
+            scale_y[:] = 0.5
+            scale_z[:] = 0.5
+            rgbs[..., 0] = 1.0
+            rgbs[..., 1] = 0.0
+            rgbs[..., 2] = 0.0
 
         gaussians = torch.cat([gs_positions, rgbs, opacity, rotation, scale_3d], dim=-1) # bs, w, h, z, gpv, 14
     

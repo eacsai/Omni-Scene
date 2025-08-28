@@ -1,6 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -18,9 +18,9 @@ import logging
 from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
+from safetensors.torch import load_file
 
-from data.mp3d_dataloader import load_MP3D_data
-
+from data.mp3d_dataloader_double_random import load_MP3D_data
 # from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
@@ -143,6 +143,18 @@ def main(args):
 
     train_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='train')
     val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='val')
+    
+    path = cfg.resume_from
+    if path:
+        accelerator.print(f"Resuming from checkpoint {path}")
+        state_dict = load_file(path, device="cpu")
+        model_dict = my_model.state_dict()
+
+        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        model_dict.update(filtered_dict)
+        my_model.load_state_dict(model_dict)
+        accelerator.print("Model weights loaded successfully before prepare().")
+    
     my_model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
         my_model, optimizer, train_dataloader, val_dataloader, scheduler
     )
@@ -155,40 +167,29 @@ def main(args):
     global_iter = 0
     first_epoch = 0
 
-    # Potentially load in the weights and states from a previous save
-    path = cfg.resume_from
-
-    # if path:
-    #     accelerator.print(f"Resuming from checkpoint {path}")
-    #     accelerator.load_state(osp.join(cfg.work_dir, path), map_location='cpu', strict=False)
-    #     global_iter = int(path.split("-")[1])
-    #     first_epoch = global_iter // num_update_steps_per_epoch
-    #     resume_step = global_iter % num_update_steps_per_epoch
-    #     print(f'successfully resumed from epoch{first_epoch}-iter{global_iter}')
-    # else:
-    #     resume_step = -1
-    # accelerator.print(f"Resuming from checkpoint {path}")
-    # accelerator.load_state(osp.join(path), map_location='cpu', strict=False)
-        
-    print('work dir: ', args.work_dir)
-    
     # training
+    # torch.autograd.set_detect_anomaly(True)
+    print('work dir: ', args.work_dir)
     print_freq = cfg.print_freq
 
     while epoch < max_num_epochs:
         my_model.train()
         data_time_s = time.time()
         time_s = time.time()
-        for i_iter, batch in enumerate(val_dataloader):
+        for i_iter, batch in enumerate(train_dataloader):
             # forward + backward + optimize
             data_time_e = time.time()
             with accelerator.accumulate(my_model):
                 optimizer.zero_grad()
-                loss, log, _, _, _, _, _, _, _ = my_model.forward(batch, "train", iter=global_iter, iter_end=cfg.volume_train_steps)
+                loss, log, _, _, _, _, _, _, _ = my_model.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
                 # loss, log, _, _, _, _, _, _, _ = my_model.module.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
 
                 accelerator.backward(loss)
-
+                # for name, param in my_model.named_parameters():
+                #     if param.grad is not None:
+                #         # 检查梯度张量中是否存在非零元素
+                #         if (param.grad != 0).any():
+                #             print(name)
                 if accelerator.sync_gradients:
                     grad_norm = accelerator.clip_grad_norm_(my_model.parameters(), cfg.grad_max_norm)
                 optimizer.step()
@@ -196,6 +197,27 @@ def main(args):
             
             # Checks if the accelerator has performed an optimization step behind the scenes
             accelerator.wait_for_everyone()
+            if accelerator.sync_gradients and accelerator.is_main_process:
+                if global_iter > 0 and global_iter % cfg.save_freq == 0:
+                    if accelerator.is_main_process:
+                        save_file_name = os.path.join(os.path.abspath(args.work_dir), f'checkpoint-{global_iter}')
+                        accelerator.save_state(save_file_name)
+                        dst_file = osp.join(args.work_dir, 'latest')
+                        mmengine.utils.symlink(save_file_name, dst_file)
+                        if logger is not None:
+                            logger.info('[TRAIN] Save latest state dict to {}.'.format(save_file_name))
+                
+                if global_iter > 0 and global_iter % cfg.val_freq == 0:
+                    my_model.eval()
+                    if accelerator.is_main_process:
+                        for i_iter_val, batch_val in enumerate(val_dataloader):
+                            val_batch_save_dir = osp.join(cfg.output_dir, cfg.exp_name, "validation",
+                                                "step-{}/batch-{}".format(global_iter, i_iter_val))
+                            log_val = my_model.validation_step(batch_val, val_batch_save_dir)
+                            # log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
+                            log.update(log_val)
+                    my_model.train()
+            
             time_e = time.time()
 
             # print loss log regularly

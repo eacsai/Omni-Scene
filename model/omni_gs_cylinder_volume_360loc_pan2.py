@@ -351,15 +351,15 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
         # mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm
 
-        test_img = to_pil_image(render_pkg_fuse["image"][0,2].clip(min=0, max=1))    
+        test_img = to_pil_image(render_pkg_fuse["image"][0,0].clip(min=0, max=1))    
         test_img.save('render_fuse_mp3d_all.png')
-        test_img = to_pil_image(render_pkg_pixel["image"][0,2].clip(min=0, max=1))    
+        test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
         test_img.save('render_pixel_mp3d_all.png')
-        test_img = to_pil_image(render_pkg_volume["image"][0,2].clip(min=0, max=1))    
+        test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
         test_img.save('render_volume_mp3d_all.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
         test_img.save('render_bev_mp3d_all.png')
-        test_img = to_pil_image(rgb_gt[0,2].clip(min=0, max=1))    
+        test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
         test_img.save('render_gt_mp3d_all.png')
 
         # vis rgb points

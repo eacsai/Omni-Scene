@@ -8,47 +8,71 @@ from torch.nn.init import normal_
 from .cross_view_hybrid_attention import TPVCrossViewHybridAttention
 from .image_cross_attention import TPVMSDeformableAttention3D
 from einops import rearrange
-import matplotlib.pyplot as plt
 
+def show_vis_points(reference_points_cam, idx=[0,1], point_size=5):
+    vis_points = reference_points_cam[0,0,:,idx,:].view(-1, 2)
+    # 1. 将Tensor转换为NumPy数组 (如果它在GPU上，先移到CPU)
+    if vis_points.is_cuda:
+        points_np = vis_points.cpu().numpy()
+    else:
+        points_np = vis_points.numpy()
 
-def vis_sample_points(spherical_phi, spherical_theta):
-    # --- 可视化 2D 散点图 ---
-    fig, ax = plt.subplots(figsize=(10, 6))
-    spherical_phi = spherical_phi[0,0]
-    spherical_theta = spherical_theta[0,0]
-    phi_np = spherical_phi.cpu().detach().numpy().flatten() # shape [512,]
-    theta_np = spherical_theta.cpu().detach().numpy().flatten() # shape [512,]
-    N = theta_np.shape[0]
-    # 绘制散点
-    ax.scatter(theta_np, phi_np,
-            s=15,       # 调整点的大小
-            alpha=0.7,  # 调整透明度
-            label=f'{N} Sampled Points')
+    u_coords = points_np[:, 0]
+    v_coords = points_np[:, 1]
 
-    # --- 美化图形 ---
-    ax.set_title('Visualization of Spherical Coordinates (Theta vs. Phi)')
-    ax.set_xlabel('Theta (Azimuthal Angle, rad)')
-    ax.set_ylabel('Phi (Polar Angle, rad)')
+    # 2. 设置图形和坐标轴
+    # 我们希望图形的显示宽度是高度的两倍。
+    # figsize 的单位是英寸。例如，10英寸宽，5英寸高。
+    fig_width_inches = 10
+    fig_height_inches = fig_width_inches / 2
 
-    # 设置坐标轴范围和刻度
-    ax.set_xlim([-0.1, 2 * np.pi + 0.1])
-    ax.set_xticks(np.linspace(0, 2*np.pi, 5))
-    ax.set_xticklabels(['0', 'π/2', 'π', '3π/2', '2π'])
+    fig, ax = plt.subplots(figsize=(fig_width_inches, fig_height_inches))
 
-    ax.set_ylim([-0.1, np.pi + 0.1])
-    ax.set_yticks(np.linspace(0, np.pi, 3))
-    ax.set_yticklabels(['0 (Pole 1)', 'π/2 (Equator)', 'π (Pole 2)']) # 具体哪个极点取决于坐标系
+    # 3. 绘制散点图
+    # s: 点的大小, marker: 点的形状
+    ax.scatter(u_coords, v_coords, s=point_size, marker='.')
 
-    ax.legend()
-    ax.grid(True, linestyle='--', alpha=0.6)
+    # 4. 设置坐标轴范围和标签
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1) # v 坐标通常从下往上增加
 
+    # 如果希望 (0,0) 在左上角，y轴向下增加（像图片一样），可以反转y轴：
+    # ax.invert_yaxis()
+    # 但通常对于归一化坐标的可视化，保持y轴向上更直观。
+
+    ax.set_xlabel("u (Normalized Width Coordinate)")
+    ax.set_ylabel("v (Normalized Height Coordinate)")
+    ax.set_title("Visualization of Sampled Points (2:1 Aspect Ratio)")
+
+    # 5. 设置坐标轴的宽高比
+    # ax.set_aspect('equal') 会使得x轴的一个单位长度等于y轴的一个单位长度。
+    # 我们希望的是整个绘图区域（由xlim和ylim定义）呈现2:1的宽高比。
+    # 由于我们的figsize已经设置了2:1，并且xlim和ylim都是[0,1]，
+    # 'auto' 或不设置通常能工作。但为了更精确控制数据的显示比例：
+    # aspect = (data_y_range / figure_height_inches) / (data_x_range / figure_width_inches)
+    # 对于我们的情况，data_x_range = 1, data_y_range = 1.
+    # aspect = (1 / fig_height_inches) / (1 / fig_width_inches)
+    # aspect = fig_width_inches / fig_height_inches = 2.0 (这是Y单位相对于X单位的比例)
+    # 不对，ax.set_aspect() 设置的是 `data_units_y / data_units_x` 的显示比例。
+    # 如果我们希望x轴的[0,1]范围在视觉上是y轴[0,1]范围的两倍长，
+    # 那么 y的一个数据单位的视觉长度 应该是 x的一个数据单位视觉长度的 0.5 倍。
+    ax.set_aspect(0.5, adjustable='box')
+    # 'adjustable="box"' 意味着通过调整绘图框的尺寸来达到这个比例。
+
+    # ax.set_aspect('auto') # 另一种选择，让它自动适应figsize
+
+    # 添加网格线以便更好地观察分布
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+    # 调整布局以防止标签被裁剪
     plt.tight_layout()
+
+    # 6. 显示图形
     plt.savefig('sample.png')
     plt.close()
 
-
 @MODELS.register_module()
-class TPVFormerEncoderCos(TransformerLayerSequence):
+class TPVFormerEncoderDecare(TransformerLayerSequence):
 
     def __init__(self,
                  tpv_h=200,
@@ -75,18 +99,8 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
         self.real_h = pc_range[4] - pc_range[1]
         self.real_z = pc_range[5] - pc_range[2]
 
-        # k = torch.arange(self.tpv_h) # 0 to M-1
-        # h_k = -1 + (k + 0.5) * (2.0 / self.tpv_h) # M 个 cos(phi) 的值，范围在 (-1, 1) 内
-        # # 限制在 [-1, 1] 防止数值误差
-        # h_k = torch.clip(h_k, -1.0, 1.0)
-        
-        h_k = torch.linspace(-0.98, 0.98, steps=self.tpv_h)
-        # 计算对应的 phi 值
-        self.phis = torch.flip(torch.arccos(h_k), dims=[0]) # M 个 phi 的值，范围在 (0, pi) 内
-
         self.level_embeds = nn.Parameter(
             torch.Tensor(num_feature_levels, embed_dims))
-        self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, embed_dims))
         self.tpv_embedding_hw = nn.Embedding(tpv_h * tpv_w, embed_dims)
         self.tpv_embedding_zh = nn.Embedding(tpv_z * tpv_h, embed_dims)
         self.tpv_embedding_wz = nn.Embedding(tpv_w * tpv_z, embed_dims)
@@ -128,7 +142,6 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
                     m, TPVCrossViewHybridAttention):
                 m.init_weights()
         normal_(self.level_embeds)
-        normal_(self.cams_embeds)
 
     @staticmethod
     def get_cross_view_ref_points(tpv_h, tpv_w, tpv_z, num_points_in_pillar):
@@ -340,8 +353,7 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
         reference_points = reference_points.unsqueeze(0).repeat(B // B_ref, num_cams, 1, 1, 1)
         ones = torch.ones_like(reference_points[..., :1], device=reference_points.device, dtype=reference_points.dtype)
         reference_points_homogeneous = torch.cat((reference_points, ones), dim=-1)
-        w2c = torch.inverse(lidar2img)
-        P_cam_homogeneous = torch.matmul(w2c, reference_points_homogeneous.unsqueeze(-1))
+        P_cam_homogeneous = torch.matmul(lidar2img, reference_points_homogeneous.unsqueeze(-1))
         P_cam_homogeneous = P_cam_homogeneous.squeeze(-1)
         w_prime = P_cam_homogeneous[..., 3:]
         reference_points = P_cam_homogeneous[..., :3] / (w_prime + eps)
@@ -352,59 +364,9 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
         theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
         phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
         reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4)
-
-        tpv_mask = (
-            (reference_points_cam[..., 1:2] > 0.0)
-            & (reference_points_cam[..., 1:2] < 1.0)
-            & (reference_points_cam[..., 0:1] < 1.0)
-            & (reference_points_cam[..., 0:1] > 0.0))
-
-        tpv_mask = torch.nan_to_num(tpv_mask).squeeze(-1)
-
-        return reference_points_cam, tpv_mask
-
-    def pano_point_sampling_spherical(self, reference_points, pc_range, img_metas):
-        B = len(img_metas)
-        # init reference_points
-        # ori_reference_points = reference_points.clone().permute(0,2,1,3).repeat(B, 1, 1, 1).unsqueeze(0)
-        # ori_reference_points_cam = ori_reference_points[..., :2]
+        # show_idx = 0
+        # show_vis_points(reference_points_cam, idx=[show_idx, D-1-show_idx], point_size=5)
         
-        eps = 1e-5
-        tri_reference_points = reference_points.clone()
-        spherical_reference_points = torch.ones_like(tri_reference_points, device=tri_reference_points.device)
-        phi_idx = (tri_reference_points[..., 1:2] * self.tpv_h - eps).int()
-        spherical_phi = self.phis.to(tri_reference_points.device)[phi_idx]
-        spherical_theta = tri_reference_points[..., 0:1]*2*torch.pi
-        # vis_sample_points(spherical_phi, spherical_theta)
-        spherical_reference_points[..., 0:1] = -tri_reference_points[..., 2:3] * torch.sin(spherical_phi) * torch.sin(spherical_theta)
-        spherical_reference_points[..., 1:2] = -tri_reference_points[..., 2:3] * torch.cos(spherical_phi)
-        spherical_reference_points[..., 2:3] = -tri_reference_points[..., 2:3] * torch.sin(spherical_phi) * torch.cos(spherical_theta)
-        B_ref, D, num_query, _ = spherical_reference_points.shape
-        
-        # init lidar2img
-        lidar2img = []
-        for img_meta in img_metas:
-            lidar2img.append(img_meta["lidar2img"])
-        lidar2img = torch.stack(lidar2img)
-        lidar2img = lidar2img[:,:,None,None,:,:].repeat(1,1,D,num_query,1,1)
-        num_cams = lidar2img.shape[1]
-
-        # get reference_points
-        spherical_reference_points = spherical_reference_points.unsqueeze(0).repeat(B // B_ref, num_cams, 1, 1, 1)
-        ones = torch.ones_like(spherical_reference_points[..., :1], device=spherical_reference_points.device, dtype=reference_points.dtype)
-        reference_points_homogeneous = torch.cat((spherical_reference_points, ones), dim=-1)
-        P_cam_homogeneous = torch.matmul(lidar2img, reference_points_homogeneous.unsqueeze(-1))
-        P_cam_homogeneous = P_cam_homogeneous.squeeze(-1)
-        w_prime = P_cam_homogeneous[..., 3:]
-        spherical_reference_points = P_cam_homogeneous[..., :3] / (w_prime + eps)
-
-        x = spherical_reference_points[...,0:1]
-        y = spherical_reference_points[...,1:2]
-        z = spherical_reference_points[...,2:3]
-        theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
-        phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
-        reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4)
-
         tpv_mask = (
             (reference_points_cam[..., 1:2] > 0.0)
             & (reference_points_cam[..., 1:2] < 1.0)
@@ -458,7 +420,6 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
             bs, num_cam, c, h, w = feat.shape
             spatial_shape = (h, w)
             feat = feat.flatten(3).permute(1, 0, 3, 2)  # num_cam, bs, hw, c
-            feat = feat + self.cams_embeds[:, None, None, :].to(dtype)
             feat = feat + self.level_embeds[None, None,
                                             lvl:lvl + 1, :].to(dtype)
             spatial_shapes.append(spatial_shape)
@@ -475,12 +436,9 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
         reference_points_cams, tpv_masks = [], []
         ref_3ds = [self.ref_3d_hw, self.ref_3d_zh, self.ref_3d_wz]
         for ref_3d in ref_3ds:
-            reference_points_cam, tpv_mask = self.pano_point_sampling_spherical(
+            reference_points_cam, tpv_mask = self.pano_point_sampling(
                 ref_3d, self.pc_range,
                 img_metas)  # num_cam, bs, hw++, #p, 2
-            # reference_points_cam, tpv_mask = self.pano_point_sampling(
-            #     ref_3d, self.pc_range,
-            #     img_metas)  # num_cam, bs, hw++, #p, 2
             reference_points_cams.append(reference_points_cam)
             tpv_masks.append(tpv_mask)
 
@@ -510,4 +468,3 @@ class TPVFormerEncoderCos(TransformerLayerSequence):
             return torch.stack(intermediate)
 
         return output
-    

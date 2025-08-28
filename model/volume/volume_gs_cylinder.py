@@ -63,15 +63,9 @@ class VolumeGaussianCylinder(BaseModule):
                 y = candidate_xyzs_i[..., 1]
                 z = candidate_xyzs_i[..., 2]
                 candidate_rs_i = (self.tpv_r * (torch.sqrt(x**2 + z**2) - self.pc_range[0]) / self.pc_rrange - eps).int() ## r
-                candidate_thetas_i = (self.tpv_theta * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) - eps).int() ## theta
+                candidate_thetas_i = (self.tpv_theta * (torch.atan2(x, z + eps) + torch.pi)/(2 * torch.pi) - eps).int() ## theta
                 candidate_zs_i = (self.tpv_z * (y - self.pc_range[2]) / self.pc_zrange - eps).int() ## z
                 
-                # original
-                # candidate_hs_i = candidate_uv_map[i][:, 1]
-                # candidate_ws_i = candidate_uv_map[i][:, 0]
-                # candidate_zs_i = (self.tpv_z * candidate_depth_pred[i][:, 0] / self.pc_zrange - 0.5).int()
-                # n, c
-                #candidate_feats_i = candidate_feats[[i, valid_mask]]
                 candidate_feats_i = candidate_feats[i]
                 # thetar: n, 2
                 candidate_coords_thetar_i = torch.stack([candidate_thetas_i, candidate_rs_i], dim=-1)

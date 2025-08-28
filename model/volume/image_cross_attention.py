@@ -33,7 +33,6 @@ class TPVImageCrossAttention(BaseModule):
 
     def __init__(self,
                  embed_dims=256,
-                 num_cams=6,
                  pc_range=None,
                  dropout=0.1,
                  init_cfg=None,
@@ -53,7 +52,6 @@ class TPVImageCrossAttention(BaseModule):
         self.fp16_enabled = False
         self.deformable_attention = MODELS.build(deformable_attention)
         self.embed_dims = embed_dims
-        self.num_cams = num_cams
         self.output_proj = nn.Linear(embed_dims, embed_dims)
         self.batch_first = batch_first
         self.tpv_h, self.tpv_w, self.tpv_z = tpv_h, tpv_w, tpv_z
@@ -106,7 +104,7 @@ class TPVImageCrossAttention(BaseModule):
         if residual is None:
             inp_residual = query
         bs, _, _ = query.size()
-
+        v = reference_points_cams[0].shape[0]
         queries = torch.split(
             query, [
                 self.tpv_h * self.tpv_w, self.tpv_z * self.tpv_h,
@@ -134,11 +132,11 @@ class TPVImageCrossAttention(BaseModule):
             max_len = max([len(each) for each in chain.from_iterable(indexes)])
 
             queries_rebatch = queries[tpv_idx].new_zeros(
-                [bs, self.num_cams, max_len, self.embed_dims])
+                [bs, v, max_len, self.embed_dims])
             reference_points_cam = reference_points_cams[tpv_idx]
             D = reference_points_cam.size(3)
             reference_points_rebatch = reference_points_cam.new_zeros(
-                [bs, self.num_cams, max_len, D, 2])
+                [bs, v, max_len, D, 2])
             for j in range(bs):
                 for i, reference_points_per_img in enumerate(reference_points_cam):
                     index_query_per_img = indexes[j][i]
@@ -148,14 +146,14 @@ class TPVImageCrossAttention(BaseModule):
                     reference_points_rebatch[j, i, :len(index_query_per_img)] = reference_points_per_img[
                         j, index_query_per_img
                     ]
-            queries_rebatches.append(queries_rebatch.view(bs * self.num_cams, max_len, self.embed_dims))
-            reference_points_rebatches.append(reference_points_rebatch.view(bs * self.num_cams, max_len, D, 2))
+            queries_rebatches.append(queries_rebatch.view(bs * v, max_len, self.embed_dims))
+            reference_points_rebatches.append(reference_points_rebatch.view(bs * v, max_len, D, 2))
 
         num_cams, l, bs, embed_dims = key.shape
 
-        key = key.permute(2, 0, 1, 3).contiguous().view(self.num_cams * bs, l,
+        key = key.permute(2, 0, 1, 3).contiguous().view(v * bs, l,
                                            self.embed_dims)
-        value = value.permute(2, 0, 1, 3).contiguous().view(self.num_cams * bs, l,
+        value = value.permute(2, 0, 1, 3).contiguous().view(v * bs, l,
                                                self.embed_dims)
 
         queries = self.deformable_attention(
@@ -166,7 +164,7 @@ class TPVImageCrossAttention(BaseModule):
             spatial_shapes=spatial_shapes,
             level_start_index=level_start_index,
         )
-        queries = [query.view(bs, self.num_cams, -1, self.embed_dims) for query in queries]
+        queries = [query.view(bs, v, -1, self.embed_dims) for query in queries]
         
         for tpv_idx, indexes in enumerate(indexeses):
             for j in range(bs):

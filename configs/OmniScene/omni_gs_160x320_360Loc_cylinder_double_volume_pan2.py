@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2_fix"
+exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4 #1e-4
@@ -69,7 +69,7 @@ camera_args = dict(
 
 eval_args = dict(
     save_vis=True,
-    save_ply=True
+    save_ply=False
 )
 
 loss_args = dict(
@@ -317,7 +317,7 @@ model = dict(
                 w=near_tpv_r_,
                 z=near_tpv_z_)),
         gs_decoder = dict(
-            type='VolumeGaussianDecoderCylinder',
+            type='VolumeGaussianDecoderCylinderOri',
             tpv_theta=near_tpv_theta_,
             tpv_r=near_tpv_r_,
             tpv_z=near_tpv_z_,
@@ -360,7 +360,7 @@ model = dict(
                 w=far_tpv_r_,
                 z=far_tpv_z_)),
         gs_decoder = dict(
-            type='VolumeGaussianDecoderCylinder',
+            type='VolumeGaussianDecoderCylinderOri',
             tpv_theta=far_tpv_theta_,
             tpv_r=far_tpv_r_,
             tpv_z=far_tpv_z_,

@@ -39,7 +39,6 @@ class PixelGaussian360Loc(BaseModule):
 
         self.use_checkpoint = use_checkpoint     
         self.plucker_to_embed = nn.Linear(6, out_embed_dims[0])
-        self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, out_embed_dims[0]))
         
         self.down_blocks = nn.ModuleList([])
         in_channels = out_embed_dims[0] + 1 + 1 # concat pseudo depth and conf

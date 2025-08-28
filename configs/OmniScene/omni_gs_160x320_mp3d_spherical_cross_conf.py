@@ -58,7 +58,7 @@ dataset_params = dict(
     num_workers_test=32
 )
 
-num_cams = 1
+num_cams = 2
 near = 0.1
 far = 15.0
 camera_args = dict(
@@ -82,9 +82,9 @@ loss_args = dict(
     weight_recon=1.0,
     weight_perceptual=0.05,
     weight_depth_abs=0.1,
-    weight_recon_vol=0,
-    weight_perceptual_vol=0,
-    weight_depth_abs_vol=0,
+    weight_recon_vol=1.0,
+    weight_perceptual_vol=0.05,
+    weight_depth_abs_vol=0.1,
     weight_volume_loss=0 #0.1
 )
 

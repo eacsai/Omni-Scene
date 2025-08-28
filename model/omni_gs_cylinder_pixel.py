@@ -13,14 +13,14 @@ from scipy.spatial.transform import Rotation as R
 from plyfile import PlyData, PlyElement
 from jaxtyping import Bool, Complex, Float, Inexact, Int, Integer, Num, Shaped, UInt
 from torch import Tensor
-from .twodgaussian import GaussianRenderer
+from .gaussian import GaussianRenderer
 from .losses import LPIPS, LossDepthTV
 from .utils.image import maybe_resize
 from .utils.benchmarker import Benchmarker
 from .utils.interpolation import interpolate_extrinsics
 
 from pano2cube import Equirec2Cube, Cube2Equirec
-from vis_feat import single_features_to_RGB
+from vis_feat import single_features_to_RGB, reduce_gaussian_features_to_rgb, save_point_cloud, point_features_to_rgb_colormap
 import torchvision.transforms as transforms
 to_pil_image = transforms.ToPILImage()
 import matplotlib.cm as cm
@@ -42,15 +42,12 @@ class OmniGaussianCylinderPixel(BaseModule):
                  backbone=None,
                  neck=None,
                  pixel_gs=None,
-                 near_volume_gs=None,
-                 far_volume_gs=None,
-                #  volume_gs=None,
+                 volume_gs=None,
                  camera_args=None,
                  loss_args=None,
                  dataset_params=None,
                  use_checkpoint=False,
-                 near_point_cloud_range=None,
-                 far_point_cloud_range=None,
+                 point_cloud_range=None,
                  **kwargs,
                  ):
 
@@ -59,19 +56,13 @@ class OmniGaussianCylinderPixel(BaseModule):
         self.use_checkpoint = use_checkpoint
         if backbone:
             self.backbone = MODELS.build(backbone)
-        if neck:
-            self.neck = MODELS.build(neck)
         self.pixel_gs = MODELS.build(pixel_gs)
-        self.near_volume_gs = MODELS.build(near_volume_gs)
-        self.far_volume_gs = MODELS.build(far_volume_gs)
-        # self.volume_gs = MODELS.build(volume_gs)
+        self.volume_gs = MODELS.build(volume_gs)
         self.dataset_params = dataset_params
         self.camera_args = camera_args
         self.loss_args = loss_args
 
-        self.near_point_cloud_range = near_point_cloud_range
-        self.far_point_cloud_range = far_point_cloud_range
-
+        self.point_cloud_range = point_cloud_range
         self.renderer = GaussianRenderer(self.device, **camera_args)
 
         # Perceptual loss
@@ -84,48 +75,28 @@ class OmniGaussianCylinderPixel(BaseModule):
         # record runtime
         self.benchmarker = Benchmarker()
 
-        self.E2C = Equirec2Cube(equ_h=160, equ_w=320, cube_length=self.camera_args['resolution'][0])
-        self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
-
-    def extract_img_feat(self, img, status="train"):
+    def extract_img_feat(self, img, depths_in, confs_in, pluckers, status="train"):
         """Extract features of images."""
-        B, N, C, H, W = img.size()
-        img = img.view(B * N, C, H, W)
+        # B, N, C, H, W = img.size()
+        # img = img.view(B * N, C, H, W)
 
         if self.use_checkpoint and status != "test":
             img_feats = torch.utils.checkpoint.checkpoint(
-                            self.backbone, img, use_reentrant=False)
+                            self.backbone, 
+                            img,
+                            depths_in,
+                            confs_in,
+                            pluckers, 
+                            use_reentrant=False)
         else:
-            img_feats = self.backbone(img)
-        img_feats = self.neck(img_feats) # BV, C, H, W
-        img_feats_reshaped = []
-        for img_feat in img_feats:
-            _, C, H, W = img_feat.size()
-            # single_features_to_RGB(img_feat)
-            img_feats_reshaped.append(img_feat.view(B, N, C, H, W))
-        return img_feats_reshaped
-
-    def cube_extract_img_feat(self, img, status="train"):
-        # TODO: transform panorama to cubemap
-        cube_rgb = self.E2C(img.squeeze(1))
-        """Extract features of images."""
-        B, N, C, H, W = cube_rgb.size()
-        cube_rgb = cube_rgb.view(B * N, C, H, W)
-
-        if self.use_checkpoint and status != "test":
-            img_feats = torch.utils.checkpoint.checkpoint(
-                            self.backbone, cube_rgb, use_reentrant=False)
-        else:
-            img_feats = self.backbone(cube_rgb)
-        img_feats = self.neck(img_feats) # BV, C, H, W
-        img_feats_reshaped = []
-        for img_feat in img_feats:
-            _, C, H, W = img_feat.size()
-            # TODO: transform cubemap to panorama
-            panorama_feat = self.C2E(img_feat)
-            single_features_to_RGB(panorama_feat)
-            img_feats_reshaped.append(panorama_feat.unsqueeze(1))
-        return img_feats_reshaped
+            img_feats = self.backbone(img,depths_in,confs_in,pluckers)
+        # img_feats = self.neck(img_feats) # BV, C, H, W
+        # img_feats_reshaped = []
+        # for img_feat in img_feats:
+        #     _, C, H, W = img_feat.size()
+        #     # single_features_to_RGB(img_feat)
+        #     img_feats_reshaped.append(img_feat.view(B, N, C, H, W))
+        return img_feats
 
     @property
     def device(self):
@@ -209,43 +180,42 @@ class OmniGaussianCylinderPixel(BaseModule):
         # test_img = to_pil_image(img[0,0].clip(min=0, max=1))    
         # test_img.save('input_img.png')
 
-        bs = img.shape[0]
-        img_feats = self.extract_img_feat(img=img)
+        bs, v, _, _, _ = img.shape
+        img_feats = self.extract_img_feat(img=img,
+                                          depths_in=data_dict["depths"], 
+                                          confs_in=data_dict["confs"], 
+                                          pluckers=data_dict["pluckers"]
+                                        )
 
         # pixel-gs prediction
         gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
+                rearrange(img_feats, "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"])
-        
+
         gaussians_all = gaussians_pixel
 
         bs = gaussians_pixel.shape[0]
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]
         render_fovys = data_dict["output_fovys"]
-
-        panorama_ray_d = torch.cat((data_dict["output_rays_o"], data_dict["output_rays_d"]), dim=-1)
-        panorama_ray_d = rearrange(panorama_ray_d, "b v h w c -> (b v) c h w").contiguous()
-        panorama_ray_d = self.E2C(panorama_ray_d)
-        panorama_ray_d = rearrange(panorama_ray_d, "(b n) v c h w -> b (n v) h w c", b=bs, n=img.shape[2]).contiguous()        
-        # gaussians_pixel[..., 3:6] = rearrange(img, 'b v c h w -> (b v) (h w) c')
+        
+        render_pkg_fuse = self.renderer.render(
+            gaussians=gaussians_all,
+            c2w=render_c2w,
+            fovx=render_fovxs,
+            fovy=render_fovys,
+            rays_o=None,
+            rays_d=None
+        )
 
         render_pkg_pixel_bev = self.renderer.render_orthographic(
-            gaussians=gaussians_pixel,
+            gaussians=gaussians_all,
             width=30,
             height=30, #mp3d 15 vigor 35
         )
-
         if split == "train" or split == "val":
-            render_pkg_pixel = self.renderer.render(
-                gaussians=gaussians_pixel,
-                c2w=render_c2w,
-                fovx=render_fovxs,
-                fovy=render_fovys,
-                rays_o=None,
-                rays_d=panorama_ray_d,
-            )
+            render_pkg_pixel = render_pkg_fuse
             render_pkg_volume = render_pkg_pixel
         else:
             render_pkg_pixel, render_pkg_volume = None, None
@@ -278,11 +248,16 @@ class OmniGaussianCylinderPixel(BaseModule):
         data_dict["mask_dptm"] = mask_dptm
 
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d_double.png')
+        test_img.save('render_volume_mp3d_pixel.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_double.png')
+        test_img.save('render_gt_mp3d_pixel.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_double.png')
+        test_img.save('render_bev_mp3d_pixel.png')
+
+        # vis rgb points
+        # points_xyz = gaussians_pixel[..., :3][4].detach().cpu().numpy()
+        # points_rgb = gaussians_pixel[..., 3:6][4].detach().cpu().numpy()
+        # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #
         if self.loss_args.weight_recon > 0:
@@ -314,31 +289,17 @@ class OmniGaussianCylinderPixel(BaseModule):
 
         # ==================== Depth loss ===================== #
         ## Depth loss for omni-gs. For regularization use.
-        # depth_m_gt = self.E2C(depth_m_gt).squeeze(2)
-        # conf_m_gt = self.E2C(conf_m_gt).squeeze(2)
+        # depth_m_gt = self.E2C(depth_m_gt.squeeze(2)).squeeze(2)
+        # conf_m_gt = self.E2C(conf_m_gt.squeeze(2)).squeeze(2)
         if self.loss_args.weight_depth_abs > 0:
             depth_abs_loss = torch.abs(render_pkg_pixel["depth"] - depth_m_gt)
             depth_abs_loss = depth_abs_loss * conf_m_gt
-            depth_abs_loss = depth_abs_loss.mean()
+            valid_mask = (render_pkg_pixel["depth"] > 0)
+            depth_abs_loss = depth_abs_loss[valid_mask].mean()
             loss = loss + self.loss_args.weight_depth_abs * depth_abs_loss
-            set_loss("depth_abs", split, depth_abs_loss, self.loss_args.weight_depth_abs)
-
-
-        if self.loss_args.weight_dist > 0:
-            dist_loss_vol = render_pkg_pixel["rend_dist"].mean()
-            loss = loss + self.loss_args.weight_dist_vol * dist_loss_vol
-            set_loss("dist_loss_vol", split, dist_loss_vol, self.loss_args.weight_dist_vol)
-
-        if self.loss_args.weight_normal_error > 0:
-            rend_normal  = render_pkg_pixel[f'rend_normal']
-            depth_normal = render_pkg_pixel[f'depth_normal']
-            acc_map = render_pkg_pixel[f'acc_map'].squeeze(2).detach()
-
-            normal_error = ((1 - (rend_normal * depth_normal).sum(dim=2))*acc_map).mean() 
-            loss = loss + self.loss_args.weight_normal_error_vol * normal_error
-            set_loss("normal_error_vol", split, normal_error, self.loss_args.weight_normal_error_vol)
-
-        return loss, loss_terms, render_pkg_pixel, render_pkg_pixel, render_pkg_pixel, gaussians_all, gaussians_pixel, gaussians_pixel, data_dict
+            set_loss("depth_abs", split, depth_abs_loss, self.loss_args.weight_depth_abs)    
+      
+        return loss, loss_terms, render_pkg_pixel, render_pkg_pixel, render_pkg_pixel, gaussians_all, gaussians_all, gaussians_all, data_dict
     
     def validation_step(self, batch, val_result_savedir):
         (loss_val, loss_term_val, render_pkg_fuse,
@@ -353,71 +314,24 @@ class OmniGaussianCylinderPixel(BaseModule):
         data_dict = self.get_data(batch)
         img = data_dict["imgs"]
         bs = img.shape[0]
-        img_feats = self.extract_img_feat(img=img, status="test")
+        img_feats = self.extract_img_feat(img=img,
+                                          depths_in=data_dict["depths"], 
+                                          confs_in=data_dict["confs"], 
+                                          pluckers=data_dict["pluckers"]
+                                        )
 
         # pixel-gs prediction
         gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
+                rearrange(img_feats, "b v c h w -> (b v) c h w"),
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"], status='test')
 
-        # volume-gs prediction
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        near_gaussians_pixel_mask, near_gaussians_feat_mask = [], []
-        far_gaussians_pixel_mask, far_gaussians_feat_mask = [], []
+        # vis feature points
+        # points_xyz = gaussians_pixel[..., :3][0].detach().cpu().numpy()
+        # points_rgb = point_features_to_rgb_colormap(gaussians_feat, cmap_name='rainbow')[0]
+        # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
 
-        cylinder_r = torch.sqrt(gaussians_pixel[..., 0]**2 + gaussians_pixel[..., 2]**2 + 1e-5)
-
-        # Cylinder
-        for b in range(bs):
-            mask_pixel_i = (cylinder_r[b] <= self.near_point_cloud_range[3]) & \
-                            (gaussians_pixel[b, :, 1] >= self.near_point_cloud_range[2]) & \
-                            (gaussians_pixel[b, :, 1] <= self.near_point_cloud_range[5])
-            # fix tab
-            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-
-            near_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            near_gaussians_feat_mask.append(gaussians_feat_mask_i)
-        
-        for b in range(bs):
-            mask_pixel_i = (cylinder_r[b] > self.far_point_cloud_range[0]) & \
-                            (cylinder_r[b] <= self.far_point_cloud_range[3]) & \
-                            (gaussians_pixel[b, :, 1] >= self.far_point_cloud_range[2]) & \
-                            (gaussians_pixel[b, :, 1] <= self.far_point_cloud_range[5])
-            # fix tab
-            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-
-            far_gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            far_gaussians_feat_mask.append(gaussians_feat_mask_i)
-        
-        with self.benchmarker.time("volume_gs"):
-            gaussians_volume_near = self.near_volume_gs(
-                    [img_feats[0]],
-                    near_gaussians_pixel_mask,
-                    near_gaussians_feat_mask,
-                    data_dict["img_metas"], status='test')
-
-            gaussians_volume_far = self.far_volume_gs(
-                    [img_feats[0]],
-                    far_gaussians_pixel_mask,
-                    far_gaussians_feat_mask,
-                    data_dict["img_metas"], status='test')     
-            
-            # gaussians_volume = torch.cat([gaussians_volume_near, gaussians_volume_far], dim=1)
-        
-            # gaussians_volume = self.volume_gs(
-            #         [img_feats[0]],
-            #         near_gaussians_pixel_mask,
-            #         near_gaussians_feat_mask,
-            #         data_dict["img_metas"], status='test')
-            gaussians_volume = torch.cat([gaussians_volume_near, gaussians_volume_far], dim=1)
-
-        gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
-        # gaussians_all = gaussians_volume
-        bs = gaussians_all.shape[0]
+        gaussians_all = gaussians_pixel
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]
         render_fovys = data_dict["output_fovys"]
@@ -436,98 +350,13 @@ class OmniGaussianCylinderPixel(BaseModule):
         output_depths = render_pkg_fuse["depth"].squeeze(2) # b v h w
 
         target_imgs = data_dict["output_imgs"] # b v 3 h w
-        target_depths = data_dict["output_depths"] # b v h w
-        target_depths_m = data_dict["output_depths_m"] # b v h w
+        target_depths = data_dict["output_depths"]# b v 1 h w
+        target_depths_m = data_dict["output_depths_m"] # b 1 v h w
 
         preds = {"img": output_imgs, "depth": output_depths, "gaussian": gaussians_all}
         gts = {"img": target_imgs, "depth": target_depths, "depth_m": target_depths_m}
 
         return preds, gts
-    
-    def forward_demo(self, batch):
-        data_dict = self.get_data(batch)
-        img = data_dict["imgs"]
-        bs = img.shape[0]
-        img_feats = self.extract_img_feat(img=img, status="test")
-
-        # pixel-gs prediction
-        gaussians_pixel, gaussians_feat = self.pixel_gs(
-                rearrange(img_feats[0], "b v c h w -> (b v) c h w"),
-                data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"])
-        
-        # volume-gs prediction
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        gaussians_pixel_mask, gaussians_feat_mask = [], []
-        for b in range(bs):
-            mask_pixel_i = (gaussians_pixel[b, :, 0] >= x_start) & (gaussians_pixel[b, :, 0] <= x_end) & \
-                        (gaussians_pixel[b, :, 1] >= y_start) & (gaussians_pixel[b, :, 1] <= y_end) & \
-                        (gaussians_pixel[b, :, 2] >= z_start) & (gaussians_pixel[b, :, 2] <= z_end)
-            gaussians_pixel_mask_i = gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = gaussians_feat[b][mask_pixel_i]
-            gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            gaussians_feat_mask.append(gaussians_feat_mask_i)
-        gaussians_volume = self.volume_gs(
-                [img_feats[0]],
-                gaussians_pixel_mask,
-                gaussians_feat_mask,
-                data_dict["img_metas"])
-        
-        gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
-
-        bs = gaussians_all.shape[0]     
-        # forward 3 meters, return, and then rotate. backward 3 meters, return, and then rotate.
-        c2w_cf = data_dict["output_c2ws"][:, -6]
-        c2w_cf_forward = c2w_cf.clone()
-        c2w_cf_forward[..., 1, 3] = c2w_cf_forward[..., 1, 3] + 3
-        c2w_cfr = data_dict["output_c2ws"][:, -5]
-        c2w_cfl = data_dict["output_c2ws"][:, -4]
-        c2w_cb = data_dict["output_c2ws"][:, -3]
-        c2w_cb[..., 1, 3] = c2w_cb[..., 1, 3] + 1.5
-        c2w_cb_backward = c2w_cb.clone()
-        c2w_cb_backward[..., 1, 3] = c2w_cb_backward[..., 1, 3] - 3
-        c2w_cbl = data_dict["output_c2ws"][:, -2]
-        c2w_cbr = data_dict["output_c2ws"][:, -1]
-        # cf -> cfr -> cbr -> cb -> cbl -> cfl -> cf
-        num_frames_short = 60
-        num_frames_long = 120
-        num_frames_all = 60 * 4 + 120 * 6
-        t_short = torch.linspace(0, 1, num_frames_short, dtype=torch.float32, device=self.device)
-        t_long = torch.linspace(0, 1 - 1 / (num_frames_long + 1), num_frames_long, dtype=torch.float32, device=self.device)
-        # obtain camera trajectories for each clip
-        c2w_interp_forward0 = interpolate_extrinsics(c2w_cf, c2w_cf_forward, t_short)
-        c2w_interp_forward1 = interpolate_extrinsics(c2w_cf_forward, c2w_cf, t_short)
-        c2w_interp_0 = interpolate_extrinsics(c2w_cf, c2w_cfr, t_long)
-        c2w_interp_1 = interpolate_extrinsics(c2w_cfr, c2w_cbr, t_long)
-        c2w_interp_2 = interpolate_extrinsics(c2w_cbr, c2w_cb, t_long)
-        c2w_interp_backward0 = interpolate_extrinsics(c2w_cb, c2w_cb_backward, t_short)
-        c2w_interp_backward1 = interpolate_extrinsics(c2w_cb_backward, c2w_cb, t_short)
-        c2w_interp_3 = interpolate_extrinsics(c2w_cb, c2w_cbl, t_long)
-        c2w_interp_4 = interpolate_extrinsics(c2w_cbl, c2w_cfl, t_long)
-        c2w_interp_5 = interpolate_extrinsics(c2w_cfl, c2w_cf, t_long)
-        c2w_interp = torch.cat([c2w_interp_forward0, c2w_interp_forward1,
-                                c2w_interp_0, c2w_interp_1, c2w_interp_2,
-                                c2w_interp_backward0, c2w_interp_backward1,
-                                c2w_interp_3, c2w_interp_4, c2w_interp_5], dim=1)
-        fovxs_interp = data_dict["output_fovxs"][:, -6:-5].repeat(1, num_frames_all)
-        fovys_interp = data_dict["output_fovys"][:, -6:-5].repeat(1, num_frames_all)
-        
-        render_pkg_fuse = self.renderer.render(
-            gaussians=gaussians_all,
-            c2w=c2w_interp,
-            fovx=fovxs_interp,
-            fovy=fovys_interp,
-            rays_o=None,
-            rays_d=None
-        )
-
-        output_imgs = render_pkg_fuse["image"] # b v 3 h w
-        output_depths = render_pkg_fuse["depth"].squeeze(2) # b v h w
-
-        preds = {"img": output_imgs, "depth": output_depths}
-
-        return preds, data_dict["bin_token"]
 
     def save_val_results(self, batch_gt, render_pkg_fuse, render_pkg_pixel, render_pkg_volume,
                          gaussians_all, gaussians_pixel, gaussians_volume, save_dir):

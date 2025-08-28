@@ -15,7 +15,7 @@ from einops import rearrange
 import torch.nn.functional as F
 import random
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler, RandomSampler, SequentialSampler
 from torchvision import transforms
 from pathlib import Path
 from model.utils.ops import get_panorama_ray_directions, get_rays
@@ -24,6 +24,39 @@ test_datasets = [{'name': 'm3d', 'dis': 0.1}, {'name': 'm3d', 'dis': 0.25}, {'na
 roots = [Path('/data/qiwei/nips25/pano_grf')]
 pano_width = 320
 pano_height = 160
+
+class ModeBatchSampler(Sampler):
+    # __init__ 中不再需要 dataset 的引用
+    def __init__(self, sampler, batch_size, drop_last):
+        # super().__init__() # Sampler的__init__不需要参数
+        self.sampler = sampler
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+
+    def __iter__(self):
+        batch = []
+        mode = random.randint(0, 1) # 為第一個 batch 決定模式
+
+        for idx in self.sampler:
+            batch.append(idx)
+            if len(batch) == self.batch_size:
+                # --- >>> 修改點：yield 包含 mode 的元组 <<< ---
+                yield [(item, mode) for item in batch]
+                # -------------------------------------------
+                batch = []
+                mode = random.randint(0, 1) # 為下一個 batch 決定新模式
+        
+        if len(batch) > 0 and not self.drop_last:
+            # --- >>> 修改點：yield 包含 mode 的元组 <<< ---
+            yield [(item, mode) for item in batch]
+            # -------------------------------------------
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.sampler) // self.batch_size
+        else:
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
+
 
 class DatasetMP3D(Dataset):
     def __init__(
@@ -39,10 +72,6 @@ class DatasetMP3D(Dataset):
         self.far = 10.0
         self.width = pano_width
         self.height = pano_height
-
-        # scan folders in cfg.roots[0]
-        if stage == "predict":
-            stage = "test"
 
         height = 512
         height = max(height, 512)
@@ -76,7 +105,11 @@ class DatasetMP3D(Dataset):
         self.data = data
         self.direction = get_panorama_ray_directions(self.height, self.width)
 
-    def __getitem__(self, idx):
+    def set_mode(self, mode):
+        self.mode = mode
+
+    def __getitem__(self, idx_with_mode):
+        idx, mode = idx_with_mode
         data = self.data[idx].copy()
         scene = data['scene_id']
         scene_path = data['root'] / scene
@@ -85,8 +118,23 @@ class DatasetMP3D(Dataset):
 
         # Load the images.
         rgbs_path = [str(scene_path / v / 'rgb.png') for v in views]
-        context_indices = torch.tensor([0, 2])
-        target_indices = torch.tensor([1])
+
+
+        if mode == 0:
+            # 模式 A
+            context_indices_list = [1]
+            target_indices_list = [0, 1, 2]
+        else:
+            # 模式 B
+            context_indices_list = [0, 2]
+            target_indices_list = [1]
+
+        context_indices = torch.tensor(context_indices_list)
+        target_indices = torch.tensor(target_indices_list)
+
+        # context_indices = torch.tensor([1])
+        # target_indices = torch.tensor([0, 1, 2])
+
         context_images = [rgbs_path[i] for i in context_indices]
         target_images = [rgbs_path[i] for i in target_indices]
         context_images = self.convert_images(context_images)
@@ -123,8 +171,6 @@ class DatasetMP3D(Dataset):
         # target_depths = target_depths.float() / 1000
         context_depths = context_depths.clamp(min=0.)
         target_depths = target_depths.clamp(min=0.)
-        context_mask = (context_m_depths > self.near) & (context_m_depths < self.far)
-        target_mask = (target_m_depths > self.near) & (target_m_depths < self.far)
 
         # load camera
         trans_path = [scene_path / v / 'tran.txt' for v in views]
@@ -278,29 +324,41 @@ def load_MP3D_data(batch_size, stage='train'):
 
     if stage == 'train':
         seed = 1234
+        sampler = RandomSampler(MP3D, generator=get_generator(seed))
         shuffle = True
         persistent_workers = True
+        drop_last = True
     elif stage == 'val':
         seed = 3456
+        sampler = SequentialSampler(MP3D)
         shuffle = False
         persistent_workers = True
+        drop_last = False
     elif stage == 'test':
         seed = 2345
+        sampler = SequentialSampler(MP3D)
         shuffle = False
         persistent_workers = False
+        drop_last = False
     else:
         seed = 6789
+        sampler = SequentialSampler(MP3D)
         shuffle = False
         persistent_workers = True
+        drop_last = False
+
+    mode_batch_sampler = ModeBatchSampler(
+        sampler=sampler,
+        batch_size=batch_size,
+        drop_last=drop_last,
+    )
 
     dataloader = DataLoader(
         MP3D, 
-        batch_size=batch_size,
         num_workers=32,
-        generator=get_generator(seed),
+        batch_sampler=mode_batch_sampler, # <-- 使用 batch_sampler
         worker_init_fn=worker_init_fn,
         persistent_workers=persistent_workers,
-        shuffle=False
     )
     # val_dataloader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
 

@@ -128,23 +128,12 @@ def single_head_split_window_attention(
             .reshape(b_new, -1, c)
         )  # [B*K*K, H/K*W/K*(N-1), C]
 
-        scores = (
-            torch.matmul(q.view(b_new, -1, c), k) / scale_factor
-        )  # [B*K*K, H/K*W/K, H/K*W/K*(N-1)]
-
-        if with_shift:
-            scores += attn_mask.repeat(b, 1, m)
-
-        attn = torch.softmax(scores, dim=-1)
-
-        out = torch.matmul(attn, v)  # [B*K*K, H/K*W/K, C]
-
         out = F.scaled_dot_product_attention(
             q.view(b_new, -1, c).to(torch.bfloat16),
             k.permute(0, 2, 1).to(torch.bfloat16),
             v.to(torch.bfloat16),
-            attn_mask.to(torch.bfloat16).repeat(b, 1, 1) if with_shift else None,
-        ).type_as(out)
+            attn_mask.to(torch.bfloat16).repeat(b, 1, m) if with_shift else None,
+        ).type_as(q)
 
         out = merge_splits(
             out.view(b_new, h // num_splits, w // num_splits, c),
@@ -482,6 +471,7 @@ class TransformerBlock(nn.Module):
                 add_per_view_attn=add_per_view_attn,
             )
         else:
+            # TODO: Test diffention attention order
             self.self_attn = TransformerLayer(
                 d_model=d_model,
                 nhead=nhead,
@@ -566,7 +556,7 @@ def batch_features(features):
 class MultiViewFeatureTransformer(nn.Module):
     def __init__(
         self,
-        num_layers=6,
+        num_layers=4,
         d_model=128,
         nhead=1,
         attention_type="swin",
@@ -617,81 +607,99 @@ class MultiViewFeatureTransformer(nn.Module):
         attn_num_splits=None,
         **kwargs,
     ):
-        if "attn_type" in kwargs and kwargs["attn_type"] == "epipolar":
-            assert len (multi_view_features) == 2, "Only support 2 views for Epipolar Transformer"
-            feature0, feature1 = multi_view_features
-            return self.forward_epipolar(feature0, feature1)
-
         # multi_view_features: list of [B, C, H, W]
         b, c, h, w = multi_view_features[0].shape
         assert self.d_model == c
 
         num_views = len(multi_view_features)
 
-        if self.attention_type == "swin" and attn_num_splits > 1:
-            # global and refine use different number of splits
-            window_size_h = h // attn_num_splits
-            window_size_w = w // attn_num_splits
+        if num_views == 1:
+            # 對於單視圖，只執行自注意力 (Self-Attention)
+            feature = multi_view_features[0]
 
-            # compute attn mask once
-            shifted_window_attn_mask = generate_shift_window_attn_mask(
-                input_resolution=(h, w),
-                window_size_h=window_size_h,
-                window_size_w=window_size_w,
-                shift_size_h=window_size_h // 2,
-                shift_size_w=window_size_w // 2,
-                device=multi_view_features[0].device,
-            )  # [K*K, H/K*W/K, H/K*W/K]
+            # Swin Transformer 仍然需要計算 mask
+            if self.attention_type == "swin" and attn_num_splits > 1:
+                window_size_h = h // attn_num_splits
+                window_size_w = w // attn_num_splits
+                shifted_window_attn_mask = generate_shift_window_attn_mask(
+                    input_resolution=(h, w),
+                    window_size_h=window_size_h,
+                    window_size_w=window_size_w,
+                    shift_size_h=window_size_h // 2,
+                    shift_size_w=window_size_w // 2,
+                    device=feature.device,
+                )
+            else:
+                shifted_window_attn_mask = None
+            
+            # 將特徵從圖像格式 [B, C, H, W] 轉換為序列格式 [B, H*W, C]
+            feature = feature.reshape(b, c, -1).permute(0, 2, 1)
+
+            # 遍歷所有 Transformer 層
+            for layer in self.layers:
+                # 將 cross-attention 退化為 self-attention
+                # 把 feature 同時作為 source 和 target 傳入
+                feature = layer(
+                    feature,
+                    feature[:,None,:,:], # target 與 source 相同
+                    height=h,
+                    width=w,
+                    shifted_window_attn_mask=shifted_window_attn_mask,
+                    attn_num_splits=attn_num_splits,
+                )
+
+            # 將特徵從序列格式還原為圖像格式
+            feature = feature.view(b, h, w, c).permute(0, 3, 1, 2).contiguous()
+            
+            # 以列表形式返回，保持輸出格式一致
+            return [feature]
+
         else:
-            shifted_window_attn_mask = None
+            if self.attention_type == "swin" and attn_num_splits > 1:
+                # global and refine use different number of splits
+                window_size_h = h // attn_num_splits
+                window_size_w = w // attn_num_splits
 
-        # [N*B, C, H, W], [N*B, N-1, C, H, W]
-        concat0, concat1 = batch_features(multi_view_features)
-        concat0 = concat0.reshape(num_views * b, c, -1).permute(
-            0, 2, 1
-        )  # [N*B, H*W, C]
-        concat1 = concat1.reshape(num_views * b, num_views - 1, c, -1).permute(
-            0, 1, 3, 2
-        )  # [N*B, N-1, H*W, C]
+                # compute attn mask once
+                shifted_window_attn_mask = generate_shift_window_attn_mask(
+                    input_resolution=(h, w),
+                    window_size_h=window_size_h,
+                    window_size_w=window_size_w,
+                    shift_size_h=window_size_h // 2,
+                    shift_size_w=window_size_w // 2,
+                    device=multi_view_features[0].device,
+                )  # [K*K, H/K*W/K, H/K*W/K]
+            else:
+                shifted_window_attn_mask = None
 
-        for i, layer in enumerate(self.layers):
-            concat0 = layer(
-                concat0,
-                concat1,
-                height=h,
-                width=w,
-                shifted_window_attn_mask=shifted_window_attn_mask,
-                attn_num_splits=attn_num_splits,
-            )
+            # [N*B, C, H, W], [N*B, N-1, C, H, W]
+            concat0, concat1 = batch_features(multi_view_features)
+            concat0 = concat0.reshape(num_views * b, c, -1).permute(
+                0, 2, 1
+            )  # [N*B, H*W, C]
+            concat1 = concat1.reshape(num_views * b, num_views - 1, c, -1).permute(
+                0, 1, 3, 2
+            )  # [N*B, N-1, H*W, C]
 
-            if i < len(self.layers) - 1:
-                # list of features
-                features = list(concat0.chunk(chunks=num_views, dim=0))
-                # [N*B, H*W, C], [N*B, N-1, H*W, C]
-                concat0, concat1 = batch_features(features)
+            for i, layer in enumerate(self.layers):
+                concat0 = layer(
+                    concat0,
+                    concat1,
+                    height=h,
+                    width=w,
+                    shifted_window_attn_mask=shifted_window_attn_mask,
+                    attn_num_splits=attn_num_splits,
+                )
 
-        features = concat0.chunk(chunks=num_views, dim=0)
-        features = [
-            f.view(b, h, w, c).permute(0, 3, 1, 2).contiguous() for f in features
-        ]
+                if i < len(self.layers) - 1:
+                    # list of features
+                    features = list(concat0.chunk(chunks=num_views, dim=0))
+                    # [N*B, H*W, C], [N*B, N-1, H*W, C]
+                    concat0, concat1 = batch_features(features)
 
-        return features
+            features = concat0.chunk(chunks=num_views, dim=0)
+            features = [
+                f.view(b, h, w, c).permute(0, 3, 1, 2).contiguous() for f in features
+            ]
 
-    def forward_epipolar(self, source, target):
-        """
-        source: [b v c h w]
-        target: [b v 1 ray sample c]
-        """
-        assert self.d_model == source.shape[2] == target.shape[-1]
-        b, v, c, h, w = source.shape
-
-        source = rearrange(source, "b v c h w -> (b v h w) () c")
-        target = rearrange(target, "b v () r s c -> (b v r) s c")
-
-        for _, layer in enumerate(self.layers):
-            # NOTE: target is not changed, following exactly pixelsplat, wierd though...
-            source = layer(source=source, target=target, attn_type="full")
-
-        source = rearrange(source, "(b v h w) () c -> b v c h w", b=b, v=v, h=h, w=w)
-
-        return source
+            return features
