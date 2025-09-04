@@ -81,7 +81,7 @@ class OmniGaussianCylinderAll(BaseModule):
         self.E2C = Equirec2Cube(equ_h=160, equ_w=320, cube_length=self.camera_args['resolution'][0])
         self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
 
-    def extract_img_feat(self, img, depths_in, confs_in, pluckers, status="train"):
+    def extract_img_feat(self, img, depths_in, confs_in, pluckers, viewmats, status="train"):
         """Extract features of images."""
         # B, N, C, H, W = img.size()
         # img = img.view(B * N, C, H, W)
@@ -92,10 +92,11 @@ class OmniGaussianCylinderAll(BaseModule):
                             img,
                             depths_in,
                             confs_in,
-                            pluckers, 
+                            pluckers,
+                            viewmats, 
                             use_reentrant=False)
         else:
-            img_feats = self.backbone(img,depths_in,confs_in,pluckers)
+            img_feats = self.backbone(img,depths_in,confs_in,pluckers,viewmats)
         # img_feats_reshaped = []       
         # for img_feat in img_feats:
         #     _, C, H, W = img_feat.size()
@@ -218,7 +219,8 @@ class OmniGaussianCylinderAll(BaseModule):
         img_feats = self.extract_img_feat(img=img,
                                           depths_in=data_dict["depths"], 
                                           confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"]
+                                          pluckers=data_dict["pluckers"],
+                                          viewmats=data_dict["c2ws"]
                                         )
 
         # pixel-gs prediction
@@ -268,6 +270,16 @@ class OmniGaussianCylinderAll(BaseModule):
         new_gaussian_points = transform_points(gaussians_volume[..., :3], rearrange(data_dict["c2ws"], "b v h w -> (b v) h w"))
         gaussians_volume = torch.cat([new_gaussian_points, gaussians_volume[..., 3:]], dim=-1)
         gaussians_volume = rearrange(gaussians_volume, '(b v) n c -> b (v n) c', v=v)
+
+        # original
+        # gaussians_volume = self.volume_gs(
+        #     [img_feats],
+        #     gaussians_pixel_mask,
+        #     gaussians_feat_mask,
+        #     data_dict["imgs"],
+        #     data_dict["depths"],
+        #     data_dict["img_metas"]
+        # )
 
         gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
 
@@ -462,6 +474,7 @@ class OmniGaussianCylinderAll(BaseModule):
                                           depths_in=data_dict["depths"], 
                                           confs_in=data_dict["confs"], 
                                           pluckers=data_dict["pluckers"],
+                                          viewmats=data_dict["c2ws"],
                                           status="test"
                                         )
 
@@ -478,6 +491,9 @@ class OmniGaussianCylinderAll(BaseModule):
         volume_gaussians_feat = rearrange(tmp_gaussians_feat, 'b v n c -> (b v) n c').contiguous()
         tmp_gaussians_points = transform_points(tmp_gaussians_pixel[..., :3], rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
         volume_gaussians_pixel = torch.cat([tmp_gaussians_points, tmp_gaussians_pixel[..., 3:]], dim=-1)
+        
+        # volume_gaussians_pixel = gaussians_pixel
+        # volume_gaussians_feat = gaussians_feat
 
         # volume-gs prediction
         pc_range = self.dataset_params.pc_range
@@ -506,6 +522,17 @@ class OmniGaussianCylinderAll(BaseModule):
             new_gaussian_points = transform_points(gaussians_volume[..., :3], rearrange(data_dict["c2ws"], "b v h w -> (b v) h w"))
             gaussians_volume = torch.cat([new_gaussian_points, gaussians_volume[..., 3:]], dim=-1)
             gaussians_volume = rearrange(gaussians_volume, '(b v) n c -> b (v n) c', v=v)
+
+            # original
+            # gaussians_volume = self.volume_gs(
+            #     [img_feats],
+            #     gaussians_pixel_mask,
+            #     gaussians_feat_mask,
+            #     data_dict["imgs"],
+            #     data_dict["depths"],
+            #     data_dict["img_metas"]
+            # )
+
 
         gaussians_all = torch.cat([gaussians_pixel, gaussians_volume], dim=1)
         # gaussians_all = gaussians_volume

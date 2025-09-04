@@ -44,7 +44,7 @@ def vis_sample_points(pixel_locs, depths, W, H):    # 4. 准备绘图数据 (将
 class VolumeGaussianDecoderCylinder(BaseModule):
     def __init__(
         self, tpv_theta, tpv_r, tpv_z, pc_range, gs_dim=14,
-        in_dims=64, hidden_dims=128, out_dims=None,
+        in_dims=64, hidden_dims=128, out_dims=None, num_cams=6,
         scale_theta=2, scale_r=2, scale_z=2, gpv=4, offset_max=None, scale_max=None,
         use_checkpoint=False
     ):
@@ -78,16 +78,13 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = lambda x: torch.sigmoid(x)
-        self.view_feature_processor = nn.Sequential(
-            # [N, 7, 3, 3] -> [N, 64, 1, 1]
-            nn.Conv2d(in_channels=7, out_channels=64, kernel_size=3, padding=0),
-            nn.LeakyReLU(),
-        )
-
+        self.sampled_feat_length = 36 * num_cams
         self.gaussian_to_color = nn.Sequential(
-            nn.Linear(64, 64, bias=True),
+            nn.Linear(self.sampled_feat_length, 128, bias=True),
             nn.LeakyReLU(),
-            nn.Linear(64, 3, bias=True),
+            nn.Linear(128, 128, bias=True),
+            nn.LeakyReLU(),
+            nn.Linear(128, 3, bias=True),
             nn.Sigmoid()
         )
 
@@ -225,7 +222,6 @@ class VolumeGaussianDecoderCylinder(BaseModule):
     def get_panorama_color(
             self,
             xyz: torch.Tensor,  # [bs, num_points, 3]
-            gs_feat: torch.Tensor, # [bs, num_points, 3]
             source_imgs: torch.Tensor, #[bs, view, c, h, w]
             source_depths: torch.Tensor, # [bs, view, h, w]
             img_metas: list, # list of dicts, each dict contains 'lidar2img' key
@@ -302,43 +298,23 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         rgb = rgb_sampled.masked_fill(mask_in_front.unsqueeze(-1)==0, 0) # [bs, view, num_points*local_h*local_w, 3]
         rgb = rgb.view(b,v,-1,local_h*local_w,3).permute(0,2,1,3,4) # [bs, num_points, view, local_h*local_w, 3]
 
-        # add cam feat
-        cam_pos = torch.inverse(source_cams)[..., :3, 3] # [bs, view, 3]
-        ob_view = xyz.unsqueeze(1) - cam_pos.unsqueeze(2) # [bs, view, num_points, 3]
-        ob_view = ob_view.permute(0, 2, 1, 3) # [bs, num_points, view, 3]
-        ob_dist = ob_view.norm(dim=-1, keepdim=True)
-        ob_view = ob_view / (ob_dist + eps)
-        ob_view = ob_view.unsqueeze(-2).repeat(1, 1, 1, local_h*local_w, 1) # [bs, num_points, view, local_h*local_w, 3]
-        
-        # sampled_feat = torch.concat([rgb, visibility_map, ob_view],dim=-1).view(b, -1, v*local_h*local_w*7) # [bs, num_points, view*local_h*local_w*7]
-        # sampled_feat = torch.concat([sampled_feat, gs_feat], dim=-1)
-        # color = self.gaussian_to_color(sampled_feat) # [bs, num_points, 3]
+        # cam_pos = torch.inverse(source_cams)[..., :3, 3] # [bs, view, 3]
+        # ob_view = xyz.unsqueeze(1) - cam_pos.unsqueeze(2) # [bs, view, num_points, 3]
+        # ob_view = ob_view.permute(0, 2, 1, 3) # [bs, num_points, view, 3]
+        # ob_dist = ob_view.norm(dim=-1, keepdim=True)
+        # ob_view = ob_view / ob_dist
+        # ob_view = ob_view.unsqueeze(-2).repeat(1, 1, 1, local_h*local_w, 1) # [bs, num_points, view, local_h*local_w, 3]
+        sampled_feat = torch.concat([rgb, visibility_map],dim=-1).view(b, -1, v*local_h*local_w*4) # [bs, num_points, view*local_h*local_w*4]
+        padding_needed = self.sampled_feat_length - v*local_h*local_w*4
+        if padding_needed > 0:
+            # F.pad 的參數格式是一個元組 (pad_left, pad_right, pad_top, pad_bottom, ...)
+            # 我們只想在最後一個維度（特徵維度 N）的右邊補 0
+            # 所以參數是 (0, padding_needed)
+            padded_feat = F.pad(sampled_feat, (0, padding_needed), "constant", 0)
+        else:
+            padded_feat = sampled_feat
 
-        # 1. 拼接原始採樣特徵
-        # [bs, num_points, view, local_h*local_w, 7]
-        # per_sample_feat = torch.cat([rgb, gs_feat[:,:,None,None,:].repeat(1,1,v,local_h*local_w,1), visibility_map, ob_view], dim=-1)
-        per_sample_feat = torch.cat([rgb, visibility_map, ob_view], dim=-1)
-        # 2. 將特徵送入視角處理器
-        # 輸入: [bs, num_points, v*local_h*local_w, 7]
-        # 輸出: [bs, num_points, v*local_h*local_w, 64]
-        _, n_pts, _, n_samples, c = per_sample_feat.shape
-        per_sample_feat_conv_input = per_sample_feat.view(b * n_pts * v, n_samples, c).permute(0, 2, 1).view(b * n_pts * v, c, local_h, local_w)
-        
-        processed_feat = self.view_feature_processor(per_sample_feat_conv_input)
-        # [b*n_pts*v, 32, 1, 1] -> [b, n_pts, v, 32]
-        processed_feat = processed_feat.view(b, n_pts, v, -1)
-        # 3. 進行聚合 (Aggregation)，這裡使用最大池化
-        # 沿著所有視角和局部窗口採樣點的維度（dim=2）進行 max pooling
-        # [bs, num_points, v, 32] -> [bs, num_points, 32]
-        aggregated_feat = torch.mean(processed_feat, dim=2)
-
-        # # 4. 拼接聚合後的視角特徵和高斯自身的特徵
-        # # [bs, num_points, 32] 和 [bs, num_points, 3] -> [bs, num_points, 35]
-        # final_feat = torch.cat([aggregated_feat, gs_feat], dim=-1)
-
-        # # 5. 送入最終的 MLP 得到顏色
-        # # 輸入維度是固定的 35
-        color = self.gaussian_to_color(aggregated_feat)
+        color = self.gaussian_to_color(padded_feat) # [bs, num_points, 3]
 
         return color
 
@@ -376,13 +352,13 @@ class VolumeGaussianDecoderCylinder(BaseModule):
             # gaussians = gaussians.view(bs, num_points, self.gpv, -1)
             gaussians = gaussians.view(bs, w, h, z, self.gpv, -1)
 
-        gs_offsets_r = self.pos_act(gaussians[..., :1]) * self.offset_max[0] * 2.0 # r
-        gs_offsets_theta = self.pos_act(gaussians[..., 1:2]) * self.offset_max[1] * 2.0 # theta
-        gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.offset_max[2] * 2.0 # z
+        gs_offsets_r = self.pos_act(gaussians[..., :1]) * self.offset_max[0] # r
+        gs_offsets_theta = self.pos_act(gaussians[..., 1:2]) * self.offset_max[1] # theta
+        gs_offsets_z = self.pos_act(gaussians[..., 2:3]) * self.offset_max[2] # z
 
-        scale_x = self.scale_act(gaussians[..., 3:4]) * 2.0
-        scale_y = self.scale_act(gaussians[..., 4:5]) * 2.0
-        scale_z = self.scale_act(gaussians[..., 5:6]) * 2.0
+        scale_x = self.scale_act(gaussians[..., 3:4])
+        scale_y = self.scale_act(gaussians[..., 4:5])
+        scale_z = self.scale_act(gaussians[..., 5:6])
 
         #gs_offsets = gaussians[..., :3]
         gs_positions, scale_3d = self.get_offsets_reference_points(
@@ -395,7 +371,6 @@ class VolumeGaussianDecoderCylinder(BaseModule):
         )
         color = self.get_panorama_color(
             gs_positions.view(bs, -1, 3),
-            gaussians[..., 6:9].view(bs, -1, 3),
             img_color,
             img_depth,
             img_metas

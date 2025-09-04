@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_cylinder_double_pixel_random"
+exp_name = "omni_gs_160x320_mp3d_cylinder_double_pixel_random2"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4 #1e-4

@@ -16,6 +16,7 @@ from .backbone import Backbone
 from .unimatch.utils import split_feature, merge_splits
 from .unimatch.position import PositionEmbeddingSine
 from .multiview_transformer import MultiViewFeatureTransformer
+# from .multiview_transformer_prope import MultiViewFeatureTransformer
 
 
 def feature_add_position_list(features_list, attn_splits, feature_channels):
@@ -54,7 +55,7 @@ class BackboneResnetCfg:
 class BackboneResnet(Backbone[BackboneResnetCfg]):
     model: ResNet
 
-    def __init__(self, d_in: int = 3, num_cams: int = 2, attn_splits: int = 2, no_cross_attn: bool = False) -> None:
+    def __init__(self, d_in: int = 3, num_cams: int = 6, attn_splits: int = 2, no_cross_attn: bool = False) -> None:
         super().__init__()
 
         assert d_in == 3
@@ -63,6 +64,8 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         self.attn_splits = attn_splits
         self.model = torch.hub.load("facebookresearch/dino:main", "dino_resnet50", trust_repo=True)
         self.plucker_to_embed = nn.Linear(6, 512)
+        self.cams_embeds = nn.Parameter(torch.empty(num_cams, 512))
+        nn.init.normal_(self.cams_embeds, mean=0.0, std=0.02) # 使用正态分布初始化
         # Set up projections
         self.projections = nn.ModuleDict({})
         for index in range(1, self.num_layers):
@@ -98,7 +101,8 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
             d_model=128,
             nhead=1,
             ffn_dim_expansion=4,
-            no_cross_attn=no_cross_attn,
+            image_height=160,
+            image_width=320,
         )
 
         # upscaler
@@ -109,10 +113,16 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         )
 
         self.upscale_refinement = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(128, 256, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3)),
             nn.GELU(approximate='none'),
-            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(256, 128, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3)),
         )
+
+        # self.upscale_refinement = nn.Sequential(
+        #     nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+        #     nn.GELU(approximate='none'),
+        #     nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
+        # )
 
     def forward(
         self,
@@ -120,9 +130,11 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         depths_in, 
         confs_in, 
         pluckers,
+        viewmats,
     ) -> Float[Tensor, "batch view d_out height width"]:
         # Merge the batch dimensions.
         b, v, c, h, w = img.shape
+        viewmats = viewmats.inverse()
         x = rearrange(img, "b v c h w -> (b v) c h w")
         
         skip = self.high_resolution_skip(x)
@@ -150,7 +162,8 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         plucker_embeds = rearrange(plucker_embeds, "(b v) h w c -> b v c h w", b=b, v=v)
         
         features = rearrange(features, "(b v) c h w -> b v c h w", b=b, v=v)
-        features = features + plucker_embeds
+        features = features + self.cams_embeds[None, :v, :, None, None] + plucker_embeds
+        # features = features + plucker_embeds
         features = rearrange(features, "b v c h w -> (b v) c h w")
         
         # rearrange pseudo depths and confs
@@ -167,7 +180,8 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         
         # Apply cross-view attention.
         features_list = list(torch.unbind(features, dim=1))
-
+        viewmats_lsit = list(torch.unbind(viewmats, dim=1))
+        Ks_list = v * [None]
         # Apply sin position embedding.
         # cur_features_list = feature_add_position_list(features_list, self.attn_splits, 128)
         # cur_features_list = self.transformer(cur_features_list, attn_num_splits=self.attn_splits)
@@ -175,6 +189,8 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         # Apply RoPE position embedding.
         cur_features_list = self.transformer(features_list, attn_num_splits=self.attn_splits)
 
+        # Apply PRoPE position embedding.
+        # cur_features_list = self.transformer(features_list, viewmats_lsit, Ks_list)
 
         features = torch.stack(cur_features_list, dim=1)  # [B, V, C, H, W]
 

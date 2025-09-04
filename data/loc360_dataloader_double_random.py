@@ -32,56 +32,6 @@ w2w = torch.tensor([  #  X -> X, Z -> Y, Y -> -Z
     [0, 0, 0, 1],
 ]).float()
 
-def two_sample(scene, extrinsics, stage="train", i=0):
-    num_views, _, _ = extrinsics.shape
-    # Compute the context view spacing based on the current global step.
-    if stage == "val":
-        # When testing, always use the full gap.
-        min_gap = max_gap = 3
-    else:
-        min_gap = max_gap = 3
-    max_gap = min(num_views - 1, min_gap)
-
-    # Pick the gap between the context views.
-    # NOTE: we keep the bug untouched to follow initial pixelsplat cfgs
-
-    context_gap = torch.randint(
-        min_gap,
-        max_gap + 1,
-        size=tuple(),
-        device='cpu',
-    ).item()
-
-    # Pick the left and right context indices.
-
-    if stage == "val":
-        index_context_left = (num_views - context_gap - 1) * i / max((100 - 1), 1)
-        index_context_left = int(index_context_left)
-    else:
-        index_context_left = torch.randint(
-            num_views - context_gap,
-            size=tuple(),
-            device='cpu',
-        ).item()
-    index_context_right = index_context_left + context_gap
-
-    index_target = torch.arange(
-            index_context_left + 1,
-            index_context_right,
-            device='cpu',
-        )
-
-    # index_target = torch.arange(
-    #         index_context_left,
-    #         index_context_right + 1,
-    #         device='cpu',
-    #     )
-
-    return (
-        torch.tensor((index_context_left, index_context_right)),
-        index_target,
-    )
-
 def one_sample(scene, extrinsics, stage="train", i=0):
     num_views, _, _ = extrinsics.shape
     context_gap = 4
@@ -98,6 +48,80 @@ def one_sample(scene, extrinsics, stage="train", i=0):
         torch.tensor([index_context_left]),
         torch.tensor((index_context_left - context_gap//2, index_context_left, index_context_left + context_gap//2)),
     )
+
+def two_sample(scene, extrinsics, times_per_scene, stage="train", i=0, global_step=0, total_steps=5000 * 6):
+    num_views, _, _ = extrinsics.shape
+    global_step = 30000
+    if stage == "val":
+        # When testing, always use a fixed, larger gap.
+        min_gap = max_gap = 3
+    else:
+        # --- CURRICULUM LEARNING LOGIC ---
+        # Define the start and end gaps for the curriculum
+        start_gap = 2
+        end_gap = 5
+        
+        # Linearly increase the max_gap from start_gap to end_gap over the total_steps
+        progress = min(global_step / total_steps, 1.0)
+        current_max_gap = start_gap + (end_gap - start_gap) * progress
+        
+        # The gap will be an integer between start_gap and the current_max_gap
+        min_gap = start_gap
+        max_gap = int(round(current_max_gap))
+        # --- END OF CURRICULUM LOGIC ---
+
+    # Ensure max_gap does not exceed the number of available views
+    max_gap = min(num_views - 1, max_gap)
+    
+    # If the scene is too short for the minimum gap, you might want to skip it or use a smaller gap
+    if max_gap < min_gap:
+        raise ValueError("Example does not have enough frames!")
+
+    # Pick the gap between the context views.
+    context_gap = max_gap
+
+    # Pick the left and right context indices.
+    if stage == "val":
+        # For validation, iterate through the scene deterministically
+        index_context_left = (num_views - context_gap - 1) * i / max((times_per_scene - 1), 1)
+        index_context_left = int(index_context_left)
+    else:
+        # For training, pick a random starting point
+        index_context_left = torch.randint(
+            0,
+            num_views - context_gap,
+            size=tuple(),
+            device='cpu',
+        ).item()
+    index_context_right = index_context_left + context_gap
+
+    if stage == "val":
+        index_target = torch.arange(
+            index_context_left,
+            index_context_right + 1,
+            device='cpu',
+        )
+    else:
+        index_target = torch.arange(
+            index_context_left,
+            index_context_right + 1,
+            device='cpu',
+        )
+        if len(index_target) < 6:
+            padding_needed = 6 - len(index_target)
+            padding = torch.full(
+                (padding_needed,),
+                index_context_left + 1,
+                dtype=index_target.dtype,
+                device=index_target.device,
+            )
+            index_target = torch.cat((index_target, padding))
+
+    return (
+        torch.tensor((index_context_left, index_context_right)),
+        index_target,
+    )
+
 
 class Dataset360Loc(IterableDataset):
     def __init__(
@@ -121,13 +145,15 @@ class Dataset360Loc(IterableDataset):
         root = Path('/data/qiwei/nips25/360Loc')
         self.data = []
         for location in locations:
-            seqs = [list((root / location / folder).glob('daytime_360*/')) for folder in ('mapping', 'query_360')]
+            seqs = [list((root / location / folder).glob('*360*/')) for folder in ('mapping', 'query_360')]
+            # seqs = [list((root / location / folder).glob('daytime_360*/')) for folder in ('mapping', 'query_360')]
             seqs = sum(seqs, [])
             self.data.extend(seqs)
 
         self.times_per_scene = 1000 if self.stage == "train" else 10
         self.load_images = True
         self.direction = get_panorama_ray_directions(self.height, self.width)
+        self.global_step = 0
 
     def shuffle(self, lst: list) -> list:
         indices = torch.randperm(len(lst))
@@ -173,12 +199,15 @@ class Dataset360Loc(IterableDataset):
                 context_indices, target_indices = two_sample(
                     scene,
                     extrinsics_orig,
+                    self.times_per_scene,
                     stage=self.stage,
                     i=i,
+                    global_step=self.global_step,
                 )
+                
                 if context_indices is None:
                     break
-
+                self.global_step += 1
 
                 # Resize the world to make the baseline 1.
                 context_extrinsics = extrinsics_orig[context_indices]

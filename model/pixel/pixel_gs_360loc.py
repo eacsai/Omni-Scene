@@ -22,13 +22,8 @@ from torch.nn.init import normal_
 class PixelGaussian360Loc(BaseModule):
 
     def __init__(self,
-                 down_block=None,
-                 mid_block=None,
-                 up_block=None,
-                 patch_sizes=None,
                  in_embed_dim=128,
                  out_embed_dims=[128, 256, 512, 512],
-                 num_cams=6,
                  near=0.1,
                  far=1000.0,
                  use_checkpoint=False,
@@ -38,54 +33,9 @@ class PixelGaussian360Loc(BaseModule):
         super().__init__()
 
         self.use_checkpoint = use_checkpoint     
-        self.plucker_to_embed = nn.Linear(6, out_embed_dims[0])
-        
-        self.down_blocks = nn.ModuleList([])
-        in_channels = out_embed_dims[0] + 1 + 1 # concat pseudo depth and conf
-        for i, out_embed_dim in enumerate(out_embed_dims):
-            is_final_block = i == len(out_embed_dims) - 1
-            patch_size = patch_sizes[i] if patch_sizes is not None else None
-            down_block.update(kv_compress_ratio=patch_size)
-            down_block.update(attention_head_dim=out_embed_dim // down_block["num_attention_heads"])
-            down_block.update(in_channels=in_channels)
-            down_block.update(out_channels=out_embed_dim)
-            down_block.update(add_downsample=not is_final_block)
-            if i == 0:
-                down_block.update(resnet_groups=1)
-            else:
-                down_block.update(resnet_groups=32)
-            in_channels = out_embed_dim
-            down_block_module = MODELS.build(down_block)
-            self.down_blocks.append(down_block_module)
-        
-        # build middle block
-        mid_block.update(in_channels=out_embed_dims[-1])
-        mid_block.update(out_channels=out_embed_dims[-1])
-        mid_block.update(attention_head_dim=out_embed_dims[-1] // mid_block["num_attention_heads"])
-        self.mid_block = MODELS.build(mid_block)
-
-        # build upsample blocks
-        reversed_out_embed_dims = out_embed_dims[::-1]
-        reversed_patch_sizes = patch_sizes[::-1] if patch_sizes is not None else [None] * len(out_embed_dims)
-        out_channels = reversed_out_embed_dims[0]
-        self.up_blocks = nn.ModuleList([])
-        prev_output_channel = out_channels
-        for i, (out_embed_dim, patch_size) in enumerate(zip(reversed_out_embed_dims, reversed_patch_sizes)):
-            out_channels = reversed_out_embed_dims[i]
-            in_channels = reversed_out_embed_dims[i]
-            is_final_block = i == len(reversed_out_embed_dims) - 1
-            up_block.update(attention_head_dim=out_embed_dim // up_block["num_attention_heads"])
-            up_block.update(kv_compress_ratio=patch_size)
-            up_block.update(in_channels=in_channels)
-            up_block.update(prev_output_channel=prev_output_channel)
-            up_block.update(out_channels=out_channels)
-            up_block.update(add_upsample=not is_final_block)
-            up_block_module = MODELS.build(up_block)
-            self.up_blocks.append(up_block_module)
-            prev_output_channel = out_channels
+        self.plucker_to_embed = nn.Linear(6, out_embed_dims[0])        
         
         # output & post-process
-        self.num_cams = num_cams
         self.near = near
         self.far = far
         self.num_surfaces = 1
@@ -135,18 +85,18 @@ class PixelGaussian360Loc(BaseModule):
     def forward(self, img_feats, depths_in, confs_in, pluckers, origins, directions, status="train"):
         """Forward training function."""
         # upsample 4x downsampled img features to original size
-        bs = origins.shape[0]
+        bs, v, _, _, _ = origins.shape
 
         gaussians = self.to_gaussians(img_feats)
         gaussians = rearrange(gaussians, "(b v) c h w -> b v (h w) c",
-                              b=bs, v=self.num_cams, c=self.gs_channels)
+                              b=bs, v=v, c=self.gs_channels)
         offsets = gaussians[..., :1]
         opacities = self.opt_act(gaussians[..., 1:2])
         scales = self.scale_act(gaussians[..., 2:5])
         rotations = self.rot_act(gaussians[..., 5:9])
         rgbs = self.rgb_act(gaussians[..., 9:12])
 
-        depths_in = rearrange(depths_in, "b v c h w-> b v (h w) c", b=bs, v=self.num_cams)
+        depths_in = rearrange(depths_in, "b v c h w-> b v (h w) c", b=bs, v=v)
 
         origins = rearrange(origins, "b v h w c -> b v (h w) c")
         origins = origins.unsqueeze(-2)
@@ -158,6 +108,6 @@ class PixelGaussian360Loc(BaseModule):
         # means = means + offsets
 
         gaussians = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
-        features = rearrange(img_feats, "(b v) c h w -> b v (h w) c", b=bs, v=self.num_cams)
+        features = rearrange(img_feats, "(b v) c h w -> b v (h w) c", b=bs, v=v)
         
         return gaussians, features, depth_pred

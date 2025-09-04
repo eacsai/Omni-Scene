@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_cylinder_double_all_new"
+exp_name = "omni_gs_160x320_360Loc_Cylinder_Double_All"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 1e-4 #1e-4
@@ -13,7 +13,7 @@ grad_max_norm = 1.0
 print_freq = 100
 save_freq = 3000
 val_freq = 3000
-max_epochs = 15
+max_epochs = 45
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
@@ -22,8 +22,8 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume_new/checkpoint-27000/model.safetensors'
-# resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_random/checkpoint-42000/model.safetensors'
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_new/checkpoint-39000/model.safetensors"
+# resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume/checkpoint-18000/model.safetensors"
 # resume_from = False
 report_to = "tensorboard"
 
@@ -175,7 +175,7 @@ self_layer = dict(
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
 model = dict(
-    type='OmniGaussianCylinderAll',
+    type='OmniGaussianCylinderVolume360LocPan2',
     use_checkpoint=use_checkpoint,
     point_cloud_range=point_cloud_range,
     with_pixel=True,
@@ -184,7 +184,7 @@ model = dict(
         type='BackboneResnet',
         d_in=3,),
     pixel_gs=dict(
-        type="PixelGaussian",
+        type="PixelGaussian360Loc",
         use_checkpoint=use_checkpoint,
         in_embed_dim=_dim_,
         out_embed_dims=[_dim_, _dim_*2, _dim_*4, _dim_*4],
@@ -237,3 +237,4 @@ model = dict(
     loss_args=loss_args,
     dataset_params=dataset_params
 )
+

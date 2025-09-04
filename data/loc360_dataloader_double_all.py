@@ -32,6 +32,23 @@ w2w = torch.tensor([  #  X -> X, Z -> Y, Y -> -Z
     [0, 0, 0, 1],
 ]).float()
 
+def one_sample(scene, extrinsics, stage="train", i=0):
+    num_views, _, _ = extrinsics.shape
+    context_gap = 4
+
+    # Pick the left and right context indices.
+
+    if stage == "val":
+        index_context_left = (num_views - context_gap - 1) * (i+1) / max((100 + 1), 1)
+        index_context_left = int(index_context_left)
+    else:
+        index_context_left = torch.randint(context_gap, (num_views - context_gap - 1), (1,)).item()
+
+    return (
+        torch.tensor([index_context_left]),
+        torch.tensor((index_context_left - context_gap//2, index_context_left, index_context_left + context_gap//2)),
+    )
+
 def two_sample(scene, extrinsics, times_per_scene, stage="train", i=0):
     num_views, _, _ = extrinsics.shape
     # Compute the context view spacing based on the current global step.
@@ -39,7 +56,7 @@ def two_sample(scene, extrinsics, times_per_scene, stage="train", i=0):
         # When testing, always use the full gap.
         min_gap = max_gap = 3
     else:
-        min_gap = max_gap = 2
+        min_gap = max_gap = 3
     max_gap = min(num_views - 1, min_gap)
 
     # Pick the gap between the context views.
@@ -82,22 +99,6 @@ def two_sample(scene, extrinsics, times_per_scene, stage="train", i=0):
         index_target,
     )
 
-def one_sample(scene, extrinsics, stage="train", i=0):
-    num_views, _, _ = extrinsics.shape
-    context_gap = 4
-
-    # Pick the left and right context indices.
-
-    if stage == "val":
-        index_context_left = (num_views - context_gap - 1) * (i+1) / max((100 + 1), 1)
-        index_context_left = int(index_context_left)
-    else:
-        index_context_left = torch.randint(context_gap, (num_views - context_gap - 1), (1,)).item()
-
-    return (
-        torch.tensor([index_context_left]),
-        torch.tensor((index_context_left - context_gap//2, index_context_left, index_context_left + context_gap//2)),
-    )
 
 class Dataset360Loc(IterableDataset):
     def __init__(

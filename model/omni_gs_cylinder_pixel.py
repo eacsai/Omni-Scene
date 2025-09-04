@@ -75,7 +75,7 @@ class OmniGaussianCylinderPixel(BaseModule):
         # record runtime
         self.benchmarker = Benchmarker()
 
-    def extract_img_feat(self, img, depths_in, confs_in, pluckers, status="train"):
+    def extract_img_feat(self, img, depths_in, confs_in, pluckers, viewmats, status="train"):
         """Extract features of images."""
         # B, N, C, H, W = img.size()
         # img = img.view(B * N, C, H, W)
@@ -86,10 +86,11 @@ class OmniGaussianCylinderPixel(BaseModule):
                             img,
                             depths_in,
                             confs_in,
-                            pluckers, 
+                            pluckers,
+                            viewmats, 
                             use_reentrant=False)
         else:
-            img_feats = self.backbone(img,depths_in,confs_in,pluckers)
+            img_feats = self.backbone(img,depths_in,confs_in,pluckers,viewmats)
         # img_feats = self.neck(img_feats) # BV, C, H, W
         # img_feats_reshaped = []
         # for img_feat in img_feats:
@@ -184,7 +185,8 @@ class OmniGaussianCylinderPixel(BaseModule):
         img_feats = self.extract_img_feat(img=img,
                                           depths_in=data_dict["depths"], 
                                           confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"]
+                                          pluckers=data_dict["pluckers"],
+                                          viewmats=data_dict["c2ws"]
                                         )
 
         # pixel-gs prediction
@@ -317,7 +319,8 @@ class OmniGaussianCylinderPixel(BaseModule):
         img_feats = self.extract_img_feat(img=img,
                                           depths_in=data_dict["depths"], 
                                           confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"]
+                                          pluckers=data_dict["pluckers"],
+                                          viewmats=data_dict["c2ws"]
                                         )
 
         # pixel-gs prediction

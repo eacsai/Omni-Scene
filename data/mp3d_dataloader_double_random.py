@@ -122,15 +122,16 @@ class DatasetMP3D(Dataset):
 
         if mode == 0:
             # 模式 A
-            context_indices_list = [1]
-            target_indices_list = [0, 1, 2]
-        else:
+            source_indices = torch.tensor([0, 1, 2])
+            shuffled_indices = source_indices[torch.randperm(len(source_indices))]
+            context_indices = shuffled_indices[0:1]
+            target_indices = shuffled_indices
+        elif mode == 1:
             # 模式 B
-            context_indices_list = [0, 2]
-            target_indices_list = [1]
-
-        context_indices = torch.tensor(context_indices_list)
-        target_indices = torch.tensor(target_indices_list)
+            source_indices = torch.tensor([0, 1, 2])
+            shuffled_indices = source_indices[torch.randperm(len(source_indices))]
+            context_indices = shuffled_indices[0:2]
+            target_indices = shuffled_indices
 
         # context_indices = torch.tensor([1])
         # target_indices = torch.tensor([0, 1, 2])

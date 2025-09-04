@@ -72,6 +72,7 @@ class TPVFormerEncoderCylinder(TransformerLayerSequence):
                  tpv_only=False,
                  pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
                  num_feature_levels=4,
+                 num_cams=6,
                  embed_dims=256,
                  num_points_in_pillar=[4, 32, 32],
                  num_points_in_pillar_cross_view=[32, 32, 32],
@@ -91,6 +92,7 @@ class TPVFormerEncoderCylinder(TransformerLayerSequence):
 
         self.level_embeds = nn.Parameter(
             torch.Tensor(num_feature_levels, embed_dims))
+        self.cams_embeds = nn.Parameter(torch.Tensor(num_cams, embed_dims))
         self.tpv_embedding_thetar = nn.Embedding(tpv_theta * tpv_r, embed_dims)
         self.tpv_embedding_ztheta = nn.Embedding(tpv_z * tpv_theta, embed_dims)
         self.tpv_embedding_rz = nn.Embedding(tpv_r * tpv_z, embed_dims)
@@ -132,6 +134,7 @@ class TPVFormerEncoderCylinder(TransformerLayerSequence):
                     m, TPVCrossViewHybridAttention):
                 m.init_weights()
         normal_(self.level_embeds)
+        normal_(self.cams_embeds)
 
     @staticmethod
     def get_cross_view_ref_points(tpv_theta, tpv_r, tpv_z, num_points_in_pillar):
@@ -349,6 +352,7 @@ class TPVFormerEncoderCylinder(TransformerLayerSequence):
             bs, num_cam, c, h, w = feat.shape
             spatial_shape = (h, w)
             feat = feat.flatten(3).permute(1, 0, 3, 2)  # num_cam, bs, hw, c
+            feat = feat + self.cams_embeds[:num_cam, None, None, :].to(dtype)
             feat = feat + self.level_embeds[None, None,
                                             lvl:lvl + 1, :].to(dtype)
             spatial_shapes.append(spatial_shape)

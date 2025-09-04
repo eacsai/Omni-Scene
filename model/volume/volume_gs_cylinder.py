@@ -114,7 +114,7 @@ class VolumeGaussianCylinder(BaseModule):
         # single_features_to_RGB(project_feats_ztheta, img_name='feat_ztheta.png')
         # single_features_to_RGB(project_feats_rz, img_name='feat_rz.png')
 
-        # vis count_rtheta
+        # # vis count_rtheta
         # linear_inds_rtheta_i = (candidate_coords_thetar_i[..., 1] * self.tpv_theta + candidate_coords_thetar_i[..., 0]).to(dtype=torch.int64)
         # count_rtheta_i = project_feats_thetar_i.new_zeros((self.tpv_theta * self.tpv_r, c), dtype=torch.float32)
         # ones_rtheta_i = torch.ones_like(candidate_feats_i)
@@ -124,15 +124,24 @@ class VolumeGaussianCylinder(BaseModule):
         # visualize_counts_as_polar_heatmap(count_rtheta_i,
         #                             self.tpv_r, 
         #                             self.tpv_theta, 
-        #                             'count_hw.png', 
+        #                             'count_rtheta.png', 
         #                             cmap_name='Blues'
         #                             )
-        # visualize_counts_as_heatmap(count_ztheta_i,
-        #                             self.tpv_z, 
+        
+        # # vis count_thetaz
+        # linear_inds_thetaz_i = (candidate_coords_ztheta_i[..., 1] * self.tpv_z + candidate_coords_ztheta_i[..., 0]).to(dtype=torch.int64)
+        # count_thetaz_i = project_feats_ztheta_i.new_zeros((self.tpv_z * self.tpv_theta, c), dtype=torch.float32)
+        # ones_thetaz_i = torch.ones_like(candidate_feats_i)
+        # count_thetaz_i.scatter_add_(0, linear_inds_thetaz_i.unsqueeze(-1).expand(-1, c), ones_thetaz_i)
+        # count_thetaz_i = torch.where(count_thetaz_i == 0, torch.ones_like(count_thetaz_i), count_thetaz_i)
+
+        # visualize_counts_as_heatmap(count_thetaz_i,
         #                             self.tpv_theta, 
-        #                             'count_zh.png', 
+        #                             self.tpv_z, 
+        #                             'count_thetaz.png', 
         #                             cmap_name='Blues'
         #                             )
+        
         # # vis count_zr
         # linear_inds_zr_i = (candidate_coords_rz_i[..., 1] * self.tpv_r + candidate_coords_rz_i[..., 0]).to(dtype=torch.int64)
         # count_zr_i = project_feats_rz_i.new_zeros((self.tpv_r * self.tpv_z, c), dtype=torch.float32)
@@ -142,7 +151,7 @@ class VolumeGaussianCylinder(BaseModule):
         # visualize_counts_as_heatmap(count_zr_i,
         #                             self.tpv_z, 
         #                             self.tpv_r, 
-        #                             'count_wz.png', 
+        #                             'count_zr.png', 
         #                             cmap_name='Blues'
         #                             )
 
