@@ -96,7 +96,7 @@ class OmniGaussianSphericalVolume(BaseModule):
         self.E2C = Equirec2Cube(equ_h=160, equ_w=320, cube_length=self.camera_args['resolution'][0])
         self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
 
-    def extract_img_feat(self, img, depths_in, confs_in, pluckers, status="train"):
+    def extract_img_feat(self, img, depths_in, confs_in, pluckers, viewmats, status="train"):
         """Extract features of images."""
         # B, N, C, H, W = img.size()
         # img = img.view(B * N, C, H, W)
@@ -107,10 +107,11 @@ class OmniGaussianSphericalVolume(BaseModule):
                             img,
                             depths_in,
                             confs_in,
-                            pluckers, 
+                            pluckers,
+                            viewmats, 
                             use_reentrant=False)
         else:
-            img_feats = self.backbone(img,depths_in,confs_in,pluckers)
+            img_feats = self.backbone(img,depths_in,confs_in,pluckers,viewmats)
         # img_feats = self.neck(img_feats) # BV, C, H, W
         # img_feats_reshaped = []
         # for img_feat in img_feats:
@@ -162,20 +163,34 @@ class OmniGaussianSphericalVolume(BaseModule):
         # for volume-gs
         img_metas = []
         bs, v, c, h, w = batch["inputs"]["rgb"].shape
-        for w2i in batch["inputs_vol"]["w2i"]:
-            # view 1
-            w2i_1 = w2i.clone()
-            ref_cam = w2i[0]
-            w2i_1[0] = w2i[0] @ ref_cam.inverse()
-            w2i_1[1] = w2i[1] @ ref_cam.inverse()
-            img_metas.append({"lidar2img": w2i, "img_shape": [[h, w]] * v})
-            # view 2
-            w2i_2 = w2i.clone()
-            w2i_2[0] = w2i_1[1].inverse()  # inverse the second view
-            w2i_2[1] = w2i_1[0] # keep the first view
-            img_metas.append({"lidar2img": w2i_2, "img_shape": [[h, w]] * v})
-            # original
-            # img_metas.append({"lidar2img": w2i, "img_shape": [[h, w]] * v})
+        for w2i in batch["inputs_vol"]["w2i"]:            
+            # 1. 動態獲取當前樣本的視圖數量 v
+            v = w2i.shape[0]
+            if v < 2: # 如果視圖少於2個，無法計算相對姿態，跳過或只用絕對姿態
+                img_metas.append({"lidar2img": w2i @ w2i.inverse(), "img_shape": [[h, w]] * v})
+                continue
+
+            # 2. 循環遍歷每一個視圖，將其輪流作為參考視圖 (reference camera)
+            for i in range(v):
+                # 複製一份原始姿態，以防修改原數據
+                w2i_relative = w2i.clone()
+                
+                # 選取第 i 個視圖作為參考相機
+                ref_cam = w2i[i]
+                
+                # 計算參考相機的逆矩陣，用於將世界坐標轉換到該相機的坐標系
+                ref_cam_inv = ref_cam.inverse()
+                
+                # 3. 使用向量化操作，將所有視圖的姿態都轉換為相對於 ref_cam 的姿態
+                # 這裡的矩陣乘法 @ 會自動進行廣播 (broadcasting)
+                # w2i 的形狀是 [v, 4, 4], ref_cam_inv 的形狀是 [4, 4]
+                # PyTorch 會將 ref_cam_inv 與 w2i 中的每一個 4x4 矩陣相乘
+                w2i_relative = w2i @ ref_cam_inv
+                
+                # 此時，w2i_relative[i] 將會是一個單位矩陣，因為它是 ref_cam @ ref_cam_inv
+                
+                # 4. 將這一組增強後的相對姿態添加到 meta 列表中
+                img_metas.append({"lidar2img": w2i_relative, "img_shape": [[h, w]] * v})
 
         data_dict["img_metas"] = img_metas
         # for render and loss and eval
@@ -221,7 +236,8 @@ class OmniGaussianSphericalVolume(BaseModule):
             img_feats = self.extract_img_feat(img=img,
                                             depths_in=data_dict["depths"], 
                                             confs_in=data_dict["confs"], 
-                                            pluckers=data_dict["pluckers"]
+                                            pluckers=data_dict["pluckers"],
+                                            viewmats=data_dict["c2ws"]
                                             )
             # pixel-gs prediction
             gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
@@ -229,18 +245,19 @@ class OmniGaussianSphericalVolume(BaseModule):
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                     data_dict["rays_o"], data_dict["rays_d"])
 
-        # volume-pixel-gs prediction
-        tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
-        tmp_gaussians_pixel = rearrange(tmp_gaussians_pixel, 'b v n c -> (b v) n c').contiguous()
-        tmp_gaussians_feat = repeat(gaussians_feat[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
-        volume_gaussians_feat = rearrange(tmp_gaussians_feat, 'b v n c -> (b v) n c').contiguous()
-        tmp_gaussians_points = transform_points(tmp_gaussians_pixel[..., :3], rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
-        volume_gaussians_pixel = torch.cat([tmp_gaussians_points, tmp_gaussians_pixel[..., 3:]], dim=-1)
+            # volume-pixel-gs prediction
+            tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
+            tmp_gaussians_pixel = rearrange(tmp_gaussians_pixel, 'b v n c -> (b v) n c').contiguous()
+            tmp_gaussians_feat = repeat(gaussians_feat[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
+            volume_gaussians_feat = rearrange(tmp_gaussians_feat, 'b v n c -> (b v) n c').contiguous()
+            tmp_gaussians_points = transform_points(tmp_gaussians_pixel[..., :3], rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
+            volume_gaussians_pixel = torch.cat([tmp_gaussians_points, tmp_gaussians_pixel[..., 3:]], dim=-1)
         
         # original
         # volume_gaussians_pixel = gaussians_pixel
         # volume_gaussians_feat = gaussians_feat
 
+        # volume-gs prediction
         pc_range = self.dataset_params.pc_range
         x_start, y_start, z_start, x_end, y_end, z_end = pc_range
         gaussians_pixel_mask, gaussians_feat_mask = [], []
@@ -300,6 +317,14 @@ class OmniGaussianSphericalVolume(BaseModule):
                 rays_o=None,
                 rays_d=None
             )
+            render_pkg_pixel = self.renderer.render(
+                gaussians=gaussians_pixel,
+                c2w=render_c2w,
+                fovx=render_fovxs,
+                fovy=render_fovys,
+                rays_o=None,
+                rays_d=None
+            )
         else:
             render_pkg_pixel, render_pkg_volume = None, None
         
@@ -319,16 +344,24 @@ class OmniGaussianSphericalVolume(BaseModule):
         data_dict["depth_m_gt"] = depth_m_gt
         data_dict["conf_m_gt"] = conf_m_gt
 
-        mask_dptm = torch.ones((bs, 1, h, w), device=self.device).float()
-        # mask_dptm = self.E2C(mask_dptm).squeeze(2)
+        output_positions = data_dict["output_positions"].view(bs, -1, 3)  # [B,v,h,w,xyz] -> [b,np,xyz]
+        positions_expanded = output_positions.unsqueeze(1).expand(-1, v, -1, -1)
+        positions_batched = positions_expanded.reshape(bs * v, -1, 3)
+
+        transformed_positions = transform_points(positions_batched, rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
+        output_spherical_r = torch.sqrt(transformed_positions[..., 0]**2 + transformed_positions[..., 1]**2 + transformed_positions[..., 2]**2 + 1e-5)
+        mask_inside = (output_spherical_r  > self.point_cloud_range[2]) & (output_spherical_r  > self.point_cloud_range[5])
+        mask_dptm = mask_inside.view(bs, v, render_c2w.shape[1], h, w).any(dim=1).float()
         data_dict["mask_dptm"] = mask_dptm
 
+        test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
+        test_img.save('render_pixel_mp3d_volume_S.png')
         test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_volume.png')
+        test_img.save('render_volume_mp3d_volume_S.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_volume.png')
+        test_img.save('render_gt_mp3d_volume_S.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_volume.png')
+        test_img.save('render_bev_mp3d_volume_S.png')
 
 
         # vis rgb points
@@ -388,7 +421,7 @@ class OmniGaussianSphericalVolume(BaseModule):
             loss = loss + self.loss_args.weight_volume_loss * volume_loss
             set_loss("volume", split, volume_loss, self.loss_args.weight_volume_loss)        
 
-        return loss, loss_terms, render_pkg_volume, render_pkg_volume, render_pkg_volume, gaussians_volume, gaussians_volume, gaussians_volume, data_dict
+        return loss, loss_terms, render_pkg_volume, render_pkg_pixel, render_pkg_volume, gaussians_volume, gaussians_pixel, gaussians_volume, data_dict
     
     def validation_step(self, batch, val_result_savedir):
         (loss_val, loss_term_val, render_pkg_fuse,

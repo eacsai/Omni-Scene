@@ -257,8 +257,12 @@ class OmniGaussianCylinderPixel(BaseModule):
         test_img.save('render_bev_mp3d_pixel.png')
 
         # vis rgb points
-        # points_xyz = gaussians_pixel[..., :3][4].detach().cpu().numpy()
-        # points_rgb = gaussians_pixel[..., 3:6][4].detach().cpu().numpy()
+        # idx = 4
+        # opactity = gaussians_pixel[..., 6:7]
+        # opactity_mask = (opactity > 0.1).squeeze(-1)
+        # gaussians_pixel_save = gaussians_pixel[idx][opactity_mask[idx]]
+        # points_xyz = gaussians_pixel_save[..., :3].detach().cpu().numpy()
+        # points_rgb = gaussians_pixel_save[..., 3:6].detach().cpu().numpy()
         # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
         # onlyDepth(render_pkg_volume["depth"][0,0,0], save_name='render_depth_mp3d_double.png')
         # ======================== RGB loss ======================== #

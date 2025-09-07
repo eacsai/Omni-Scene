@@ -96,7 +96,7 @@ class OmniGaussianDecareVolume(BaseModule):
         self.E2C = Equirec2Cube(equ_h=160, equ_w=320, cube_length=self.camera_args['resolution'][0])
         self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
 
-    def extract_img_feat(self, img, depths_in, confs_in, pluckers, status="train"):
+    def extract_img_feat(self, img, depths_in, confs_in, pluckers, viewmats, status="train"):
         """Extract features of images."""
         # B, N, C, H, W = img.size()
         # img = img.view(B * N, C, H, W)
@@ -107,10 +107,11 @@ class OmniGaussianDecareVolume(BaseModule):
                             img,
                             depths_in,
                             confs_in,
-                            pluckers, 
+                            pluckers,
+                            viewmats, 
                             use_reentrant=False)
         else:
-            img_feats = self.backbone(img,depths_in,confs_in,pluckers)
+            img_feats = self.backbone(img,depths_in,confs_in,pluckers,viewmats)
         # img_feats = self.neck(img_feats) # BV, C, H, W
         # img_feats_reshaped = []
         # for img_feat in img_feats:
@@ -162,21 +163,37 @@ class OmniGaussianDecareVolume(BaseModule):
         # for volume-gs
         img_metas = []
         bs, v, c, h, w = batch["inputs"]["rgb"].shape
-        for w2i in batch["inputs_vol"]["w2i"]:
-            # view 1
-            w2i_1 = w2i.clone()
-            ref_cam = w2i[0]
-            w2i_1[0] = w2i[0] @ ref_cam.inverse()
-            w2i_1[1] = w2i[1] @ ref_cam.inverse()
-            img_metas.append({"lidar2img": w2i, "img_shape": [[h, w]] * v})
-            # view 2
-            w2i_2 = w2i.clone()
-            w2i_2[0] = w2i_1[1].inverse()  # inverse the second view
-            w2i_2[1] = w2i_1[0] # keep the first view
-            img_metas.append({"lidar2img": w2i_2, "img_shape": [[h, w]] * v})
-            # original
-            # img_metas.append({"lidar2img": w2i, "img_shape": [[h, w]] * v})
+        for w2i in batch["inputs_vol"]["w2i"]:            
+            # 1. 動態獲取當前樣本的視圖數量 v
+            v = w2i.shape[0]
+            if v < 2: # 如果視圖少於2個，無法計算相對姿態，跳過或只用絕對姿態
+                img_metas.append({"lidar2img": w2i @ w2i.inverse(), "img_shape": [[h, w]] * v})
+                continue
 
+            # 2. 循環遍歷每一個視圖，將其輪流作為參考視圖 (reference camera)
+            for i in range(v):
+                # 複製一份原始姿態，以防修改原數據
+                w2i_relative = w2i.clone()
+                
+                # 選取第 i 個視圖作為參考相機
+                ref_cam = w2i[i]
+                
+                # 計算參考相機的逆矩陣，用於將世界坐標轉換到該相機的坐標系
+                ref_cam_inv = ref_cam.inverse()
+                
+                # 3. 使用向量化操作，將所有視圖的姿態都轉換為相對於 ref_cam 的姿態
+                # 這裡的矩陣乘法 @ 會自動進行廣播 (broadcasting)
+                # w2i 的形狀是 [v, 4, 4], ref_cam_inv 的形狀是 [4, 4]
+                # PyTorch 會將 ref_cam_inv 與 w2i 中的每一個 4x4 矩陣相乘
+                w2i_relative = w2i @ ref_cam_inv
+                
+                # 此時，w2i_relative[i] 將會是一個單位矩陣，因為它是 ref_cam @ ref_cam_inv
+                
+                # 4. 將這一組增強後的相對姿態添加到 meta 列表中
+                img_metas.append({"lidar2img": w2i_relative, "img_shape": [[h, w]] * v})
+        # original
+        # for w2i in batch["inputs_vol"]["w2i"]:    
+        #     img_metas.append({"lidar2img": w2i, "img_shape": [[h, w]] * v})
         data_dict["img_metas"] = img_metas
         # for render and loss and eval
         data_dict["output_imgs"] = batch["outputs"]["rgb"].to(device_id, dtype=self.dtype)
@@ -221,7 +238,8 @@ class OmniGaussianDecareVolume(BaseModule):
             img_feats = self.extract_img_feat(img=img,
                                             depths_in=data_dict["depths"], 
                                             confs_in=data_dict["confs"], 
-                                            pluckers=data_dict["pluckers"]
+                                            pluckers=data_dict["pluckers"],
+                                            viewmats=data_dict["c2ws"]
                                             )
             # pixel-gs prediction
             gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
@@ -339,13 +357,13 @@ class OmniGaussianDecareVolume(BaseModule):
 
 
         test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_volume.png')
+        test_img.save('render_volume_mp3d_volume_D.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_volume.png')
+        test_img.save('render_gt_mp3d_volume_D.png')
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d_volume.png')
+        test_img.save('render_pixel_mp3d_volume_D.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_volume.png')
+        test_img.save('render_bev_mp3d_volume_D.png')
 
 
         # vis rgb points
@@ -460,6 +478,7 @@ class OmniGaussianDecareVolume(BaseModule):
                                           depths_in=data_dict["depths"], 
                                           confs_in=data_dict["confs"], 
                                           pluckers=data_dict["pluckers"],
+                                          viewmats=data_dict["c2ws"],
                                           status="test"
                                         )
         # pixel-gs prediction

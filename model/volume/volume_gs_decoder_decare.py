@@ -8,40 +8,12 @@ def sigmoid_scaling(scaling:torch.Tensor, lower_bound=0.005, upper_bound=0.02):
     sig = torch.sigmoid(scaling)
     return lower_bound * (1 - sig) + upper_bound * sig
 
-def vis_sample_points(pixel_locs, depths, W, H):    # 4. 准备绘图数据 (将PyTorch张量转为NumPy数组)
-    u = pixel_locs[:, 0].detach().cpu().numpy()
-    v = pixel_locs[:, 1].detach().cpu().numpy()
-    d = depths.detach().cpu().numpy().flatten()
-
-    # 5. 使用 matplotlib 进行可视化
-    plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    scatter = ax.scatter(u, v, c=d, cmap='viridis', s=5, alpha=0.8)
-
-    # 添加颜色条
-    cbar = fig.colorbar(scatter, ax=ax)
-    cbar.set_label('深度 (Depth)')
-
-    # 设置坐标轴和标题
-    ax.set_title('球形投影可视化 (Spherical Projection Visualization)')
-    ax.set_xlabel('u 坐标 (来自方位角 Theta)')
-    ax.set_ylabel('v 坐标 (来自俯仰角 Phi)')
-    ax.set_xlim(0, W)
-    # 反转y轴，使(0,0)在左上角，符合图像坐标习惯
-    ax.set_ylim(H, 0) 
-    ax.set_aspect('equal', adjustable='box') # 保持图像比例
-    ax.grid(True, linestyle='--', alpha=0.3)
-
-    plt.savefig('spherical_projection_visualization.png', dpi=300, bbox_inches='tight')
-    plt.close()
-
 
 @MODELS.register_module()
 class VolumeGaussianDecoderDecare(BaseModule):
     def __init__(
         self, tpv_h, tpv_w, tpv_z, pc_range, gs_dim=14,
-        in_dims=64, hidden_dims=128, out_dims=None,
+        in_dims=64, hidden_dims=128, out_dims=None, num_cams=6,
         scale_h=2, scale_w=2, scale_z=2, gpv=4, offset_max=None, scale_max=None,
         use_checkpoint=False
     ):
@@ -84,12 +56,14 @@ class VolumeGaussianDecoderDecare(BaseModule):
         self.opacity_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = lambda x: torch.sigmoid(x)
+        self.sampled_feat_length = 36 * num_cams
         self.gaussian_to_color = nn.Sequential(
-            nn.Linear(72, 128, bias=True),
+            nn.Linear(self.sampled_feat_length, 128, bias=True),
             nn.LeakyReLU(),
             nn.Linear(128, 128, bias=True),
             nn.LeakyReLU(),
             nn.Linear(128, 3, bias=True),
+            nn.Sigmoid()
         )
         # obtain anchor points for gaussians
         gs_anchors = self.get_reference_points(tpv_h * scale_h, tpv_w * scale_w, tpv_z * scale_z, pc_range) # 1, w, h, z, 3
@@ -264,7 +238,16 @@ class VolumeGaussianDecoderDecare(BaseModule):
         # ob_view = ob_view / ob_dist
         # ob_view = ob_view.unsqueeze(-2).repeat(1, 1, 1, local_h*local_w, 1) # [bs, num_points, view, local_h*local_w, 3]
         sampled_feat = torch.concat([rgb, visibility_map],dim=-1).view(b, -1, v*local_h*local_w*4) # [bs, num_points, view*local_h*local_w*4]
-        color = self.gaussian_to_color(sampled_feat) # [bs, num_points, 3]
+        padding_needed = self.sampled_feat_length - v*local_h*local_w*4
+        if padding_needed > 0:
+            # F.pad 的參數格式是一個元組 (pad_left, pad_right, pad_top, pad_bottom, ...)
+            # 我們只想在最後一個維度（特徵維度 N）的右邊補 0
+            # 所以參數是 (0, padding_needed)
+            padded_feat = F.pad(sampled_feat, (0, padding_needed), "constant", 0)
+        else:
+            padded_feat = sampled_feat
+
+        color = self.gaussian_to_color(padded_feat) # [bs, num_points, 3]
 
         return color
 

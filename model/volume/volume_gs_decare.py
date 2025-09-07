@@ -6,7 +6,7 @@ from mmengine.model import BaseModule
 from mmengine.registry import MODELS
 import warnings
 from einops import rearrange
-from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap
+from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap, features_to_blocky_heatmap
 import math
 
 @MODELS.register_module()
@@ -115,6 +115,11 @@ class VolumeGaussianDecare(BaseModule):
         # single_features_to_RGB(project_feats_zh, img_name='feat_zh.png')
         # single_features_to_RGB(project_feats_wz, img_name='feat_wz.png')
 
+
+        # features_to_blocky_heatmap(project_feats_hw, img_name='feat_hw.png', cmap_name='Blues', final_w=512, pixels_per_block=1, idx=1)
+        # features_to_blocky_heatmap(project_feats_zh, img_name='feat_zh.png', cmap_name='Reds', final_w=512, pixels_per_block=1, idx=1)
+        # features_to_blocky_heatmap(project_feats_wz, img_name='feat_wz.png', cmap_name='Greens', final_w=512, pixels_per_block=1, idx=1)
+
         # visualize_counts_as_heatmap(count_hw_i,
         #                             self.tpv_h, 
         #                             self.tpv_w, 
@@ -136,7 +141,7 @@ class VolumeGaussianDecare(BaseModule):
 
 
         if self.use_checkpoint and status != "test":
-            input_vars_enc = (img_feats, project_feats, img_metas)
+            input_vars_enc = (img_feats, project_feats, img_metas, img_color)
             outs = torch.utils.checkpoint.checkpoint(
                 self.encoder, *input_vars_enc, use_reentrant=False
             )
@@ -149,7 +154,7 @@ class VolumeGaussianDecare(BaseModule):
                 use_reentrant=False,
             )
         else:
-            outs = self.encoder(img_feats, project_feats, img_metas)
+            outs = self.encoder(img_feats, project_feats, img_metas, img_color)
             gaussians = self.gs_decoder(
                 outs, 
                 img_color, 
@@ -159,4 +164,5 @@ class VolumeGaussianDecare(BaseModule):
         bs = gaussians.shape[0]
         n_feature = gaussians.shape[-1]
         gaussians = gaussians.reshape(bs, -1, n_feature)
+
         return gaussians

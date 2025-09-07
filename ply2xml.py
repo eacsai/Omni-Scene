@@ -1,7 +1,7 @@
 import numpy as np
 
-# 98 for pixel and 15 for voxel
-def standardize_bbox(pcl, points_per_object, percentile_to_keep=15.0):
+# 90 for pixel and 15 for voxel
+def standardize_bbox(pcl, points_per_object, percentile_to_keep=60.0):
     """
     先对整个点云剔除离群点，然后进行采样和归一化，同时处理颜色信息。
     
@@ -186,7 +186,7 @@ xml_segments = [xml_head]
 # 读取PLY文件
 from plyfile import PlyData
 import pandas as pd
-file_dir = 'point_cloud_volume.ply'  #文件的路径
+file_dir = 'point_cloud.ply'  #文件的路径
 plydata = PlyData.read(file_dir)  # 读取文件
 data = plydata.elements[0].data  # 读取数据
 data_pd = pd.DataFrame(data)  # 转换成DataFrame, 因为DataFrame可以解析结构化的数据

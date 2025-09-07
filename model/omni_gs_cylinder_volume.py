@@ -355,19 +355,19 @@ class OmniGaussianCylinderVolume(BaseModule):
         # test_img.save('mask_dptm.png')
 
         test_img = to_pil_image(render_pkg_volume["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_volume_mp3d_volume_C.png')
+        test_img.save('render_volume_mp3d_volume.png')
         test_img = to_pil_image(rgb_gt[0,0].clip(min=0, max=1))    
-        test_img.save('render_gt_mp3d_volume_C.png')
+        test_img.save('render_gt_mp3d_volume.png')
         test_img = to_pil_image(render_pkg_pixel["image"][0,0].clip(min=0, max=1))    
-        test_img.save('render_pixel_mp3d_volume_C.png')
+        test_img.save('render_pixel_mp3d_volume.png')
         test_img = to_pil_image(render_pkg_pixel_bev["image"][0].clip(min=0, max=1))
-        test_img.save('render_bev_mp3d_volume_C.png')
+        test_img.save('render_bev_mp3d_volume.png')
 
 
         # vis rgb points
         # idx = 4
         # opactity = gaussians_volume[..., 6:7]
-        # opactity_mask = (opactity > 0.9).squeeze(-1)
+        # opactity_mask = (opactity > 0.95).squeeze(-1)
         # gaussians_volume_save = gaussians_volume[idx][opactity_mask[idx]]
         # points_xyz = gaussians_volume_save[..., :3].detach().cpu().numpy()
         # points_rgb = gaussians_volume_save[..., 3:6].detach().cpu().numpy()

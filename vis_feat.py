@@ -6,6 +6,8 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import open3d as o3d
+from skimage.measure import block_reduce # 导入块缩减函数
+from scipy.ndimage import map_coordinates
 
 def reshape_normalize(x):
     '''
@@ -26,6 +28,202 @@ def normalize(x):
     denominator = np.linalg.norm(x, axis=-1, keepdims=True)
     denominator = np.where(denominator == 0, 1, denominator)
     return x / denominator
+
+def features_to_blocky_heatmap(
+    sat_features,
+    idx=0,
+    img_name='test_blocky_heatmap.png',
+    aggregation_method='pca',
+    cmap_name='inferno',
+    pixels_per_block=4, # 【核心修改】定义每个块状格子的像素边长
+    final_w=256,
+    use_polar_transform=False, # 将 Cartesian 参数改为更清晰的名称
+    block=False, # 是否分块
+):
+    """
+    将多通道特征图转换为块状（大格子）风格的热力图。
+    采用“固定格子大小”逻辑，确保在不同分辨率输入下格子密度均匀。
+    
+    Args:
+        pixels_per_block (int): 每个最终的块状格子代表的原始特征图区域的边长（像素）。
+        use_polar_transform (bool): 如果为True，则将输入特征图从极坐标(H=θ, W=r)转为笛卡尔坐标进行可视化。
+    """
+    # --- 辅助函数 (保持不变) ---
+    def reshape_for_pca(feature_map):
+        C, H, W = feature_map.shape
+        return feature_map.transpose(1, 2, 0).reshape(H * W, C)
+
+    def normalize_0_1(arr):
+        arr_min = arr.min()
+        arr_max = arr.max()
+        if arr_max == arr_min:
+            return np.zeros_like(arr)
+        return (arr - arr_min) / (arr_max - arr_min)
+
+    # 1. 提取并转换数据
+    if hasattr(sat_features, 'data'):
+        sat_feat_slice = sat_features[idx, :, :, :].data.cpu().numpy()
+    else:
+        sat_feat_slice = sat_features[idx, :, :, :]
+
+    # 2. 聚合为单通道强度图
+    C, H_orig, W_orig = sat_feat_slice.shape
+    if aggregation_method == 'mean':
+        intensity_map = np.mean(sat_feat_slice, axis=0)
+    # ... (其他聚合方法逻辑不变)
+    elif aggregation_method == 'pca':
+        reshaped_features = reshape_for_pca(sat_feat_slice)
+        pca = PCA(n_components=1)
+        principal_component = pca.fit_transform(reshaped_features)
+        intensity_map = principal_component.reshape(H_orig, W_orig)
+    else:
+        raise ValueError(f"不支持的聚合方法: {aggregation_method}")
+
+    # 3. （可选）执行极坐标到笛卡尔坐标的转换
+    if use_polar_transform:
+        # 创建一个与原图相同尺寸的笛卡尔坐标网格
+        x = np.linspace(-1, 1, W_orig)
+        y = np.linspace(-1, 1, H_orig)
+        xv, yv = np.meshgrid(x, y)
+        radius = np.sqrt(xv**2 + yv**2)
+        theta = np.arctan2(yv, xv)
+        
+        # 将半径归一化到 [0, 1] 范围内
+        max_radius = np.max(radius)
+        if max_radius > 0:
+            radius /= max_radius
+        
+        w_coords = radius * (W_orig - 1)
+        h_coords = (theta + np.pi) / (2 * np.pi) * (H_orig - 1)
+        
+        coords = np.stack([h_coords, w_coords])
+        final_map = map_coordinates(intensity_map, coords, order=1, cval=0.0)
+    else:
+        final_map = intensity_map
+        
+    # 5. 归一化低分辨率强度图并应用颜色映射 (保持不变)
+    if block:
+        # 4. 【核心步骤】使用“固定格子大小”进行降采样
+        H, W = final_map.shape # 获取待处理图的尺寸
+        
+        # 直接定义块的大小
+        block_h = pixels_per_block
+        block_w = pixels_per_block
+        
+        print(f"原始尺寸: ({H_orig}, {W_orig}) -> 待处理尺寸: ({H}, {W})")
+        print(f"每个格子的像素大小固定为: ({block_h}, {block_w})")
+
+        if H < block_h or W < block_w:
+            raise ValueError(f"pixels_per_block ({pixels_per_block}) 不能大于图片尺寸 ({H}, {W})。")
+
+        # 使用 block_reduce 进行平均池化，得到低分辨率的强度图
+        # 最终的格子数会根据图片尺寸和格子大小自动计算得出
+        low_res_map = block_reduce(final_map, block_size=(block_h, block_w), func=np.mean)
+        low_h, low_w = low_res_map.shape
+        normalized_map = normalize_0_1(low_res_map)
+        print(f"块状热力图格子数: {low_res_map.shape}")
+    else:
+        low_h, low_w = final_map.shape
+        normalized_map = normalize_0_1(final_map)
+    cmap = plt.get_cmap(cmap_name)
+    heatmap_rgba = cmap(normalized_map)
+    heatmap_rgb = (heatmap_rgba[:, :, :3] * 255).astype(np.uint8)
+    
+    # 6. 将低分辨率的彩色图放大，并保持块状效果
+    low_res_img = Image.fromarray(heatmap_rgb)
+    
+    # 放大时，需要保持 low_res_map 的长宽比
+    aspect_ratio = low_h / low_w if low_w > 0 else 0
+    final_h = int(round(final_w * aspect_ratio))
+    
+    final_img = low_res_img.resize((final_w, final_h), Image.Resampling.NEAREST)
+
+    # 7. 保存图像
+    final_img.save(img_name)
+    print(f"块状热力图已保存至: {img_name}")
+
+
+def visualize_polar_as_cartesian(
+    polar_features,
+    idx=0,
+    img_name='test_polar_to_cartesian.png',
+    aggregation_method='pca',
+    cmap_name='inferno',
+    output_size=512  # 定义最终输出的笛卡爾图像边长
+):
+    """
+    将极坐标下的特征图 (H=theta, W=r) 转换为笛卡尔坐标 (y, x) 并可视化。
+    """
+    # --- 辅助函数 (与之前类似) ---
+    def normalize_0_1(arr):
+        arr_min = arr.min()
+        arr_max = arr.max()
+        if arr_max == arr_min:
+            return np.zeros_like(arr)
+        return (arr - arr_min) / (arr_max - arr_min)
+
+    # 1. 提取特征并聚合为单通道强度图
+    if hasattr(polar_features, 'data'):
+        polar_feat_slice = polar_features[idx, :, :, :].data.cpu().numpy()
+    else:
+        polar_feat_slice = polar_features[idx, :, :, :]
+
+    C, H_theta, W_r = polar_feat_slice.shape
+
+    # 使用与之前相同的方法聚合特征
+    if aggregation_method == 'mean':
+        intensity_map_polar = np.mean(polar_feat_slice, axis=0)
+    elif aggregation_method == 'pca':
+        reshaped = polar_feat_slice.transpose(1, 2, 0).reshape(H_theta * W_r, C)
+        pca = PCA(n_components=1)
+        pc = pca.fit_transform(reshaped)
+        intensity_map_polar = pc.reshape(H_theta, W_r)
+    else:
+        raise ValueError(f"不支持的方法: {aggregation_method}")
+
+    # --- 核心步骤: 极坐标到笛卡尔坐标的逆向变换 ---
+
+    # 2. 创建输出的笛卡尔坐标网格
+    # 创建一个 (output_size x output_size) 的网格
+    x = np.linspace(-1, 1, output_size)
+    y = np.linspace(-1, 1, output_size)
+    xv, yv = np.meshgrid(x, y)
+
+    # 3. 将笛卡尔坐标 (x, y) 转换为极坐标 (r, theta)
+    # r 的范围是 [0, sqrt(2)]，我们将其归一化到 [0, 1]
+    radius = np.sqrt(xv**2 + yv**2)
+    # theta 的范围是 [-pi, pi]
+    theta = np.arctan2(yv, xv)
+
+    # 4. 将极坐标 (r, theta) 映射到输入特征图的索引 (h, w)
+    #   - 半径 r -> 宽度 w (w_r 对应最大半径)
+    #     我们将笛卡尔网格中的最大半径1映射到极坐标图的最外圈
+    w_coords = radius * (W_r - 1)
+    
+    #   - 角度 theta -> 高度 h (h_theta 对应 2*pi)
+    #     将 [-pi, pi] 的 theta 映射到 [0, H_theta-1] 的 h 索引
+    h_coords = (theta + np.pi) / (2 * np.pi) * (H_theta - 1)
+
+    # 5. 使用 map_coordinates 进行插值
+    # map_coordinates 需要的坐标格式是 [[h1,h2,...], [w1,w2,...]]
+    coords = np.stack([h_coords, w_coords])
+    
+    # order=1 表示双线性插值，cval=0.0 表示在原始图像范围外的点填充为0（黑色）
+    cartesian_map = map_coordinates(intensity_map_polar, coords, order=1, cval=0.0)
+
+    # --- 可视化 ---
+
+    # 6. 归一化并应用颜色映射
+    normalized_map = normalize_0_1(cartesian_map)
+    cmap = plt.get_cmap(cmap_name)
+    heatmap_rgba = cmap(normalized_map)
+    heatmap_rgb = (heatmap_rgba[:, :, :3] * 255).astype(np.uint8)
+    
+    # 7. 保存图像
+    final_img = Image.fromarray(heatmap_rgb)
+    final_img.save(img_name)
+    print(f"极坐标特征图已转换为笛卡尔坐标热力图并保存至: {img_name}")
+
 
 def single_features_to_RGB(sat_features, idx=0, img_name='test_img.png'):
     sat_feat = sat_features[idx:idx+1,:,:,:].data.cpu().numpy()
@@ -322,3 +520,82 @@ def visualize_counts_as_polar_heatmap(count_tensor, num_r, num_theta, filename, 
 
     # m. 使用Pillow从RGBA数组创建图像并保存
     Image.fromarray(img_rgba, 'RGBA').save(filename)
+
+def show_vis_points(
+    reference_points_cam, 
+    idx=0, 
+    point_size=50, 
+    background_image=None,
+    output_filename='sample.png',
+    background_alpha=0.5
+):
+    """
+    可视化采样点。可以选择性地将点绘制在一张背景图上，并确保输出比例和方向正确。
+
+    Args:
+        reference_points_cam (torch.Tensor): 形状为 [B, N, S, D, 2] 的采样点张量。
+        idx (int): 要可视化的深度索引 (D)。
+        point_size (int): 散点的大小。
+        background_image (torch.Tensor, optional): 形状为 [3, H, W] 的RGB图像张量。默认为 None。
+        output_filename (str): 保存图像的文件名。
+    """
+    # --- 1. 提取采样点坐标 (保持不变) ---
+    vis_points = reference_points_cam[0, 0, :, idx, :].view(-1, 2)
+    if vis_points.is_cuda:
+        points_np = vis_points.cpu().detach().numpy()
+    else:
+        points_np = vis_points.detach().numpy()
+
+    u_coords = points_np[:, 0]
+    v_coords = points_np[:, 1]
+
+    # --- 2. 根據有無背景圖，預先計算好所有繪圖參數 (保持不变) ---
+    fig_width_inches = 10
+    bg_img_np = None
+
+    if background_image is not None:
+        C, H, W = background_image.shape
+        aspect_ratio = H / W
+        fig_height_inches = fig_width_inches * aspect_ratio
+        bg_img_np = background_image.cpu().permute(1, 2, 0).numpy()
+    else:
+        aspect_ratio = 0.5
+        fig_height_inches = fig_width_inches * aspect_ratio
+
+    # --- 3. 使用計算好的尺寸創建畫布 (保持不变) ---
+    fig, ax = plt.subplots(figsize=(fig_width_inches, fig_height_inches))
+    
+    # --- 4. 繪製背景 (如果存在) (保持不变) ---
+    if bg_img_np is not None:
+        ax.imshow(bg_img_np, extent=[0, 1, 1, 0], aspect='auto', alpha=background_alpha)
+
+    # --- 5. 繪製散點圖 (保持不变) ---
+    ax.scatter(u_coords, v_coords, s=point_size, marker='.')
+
+    # --- 6. 設置坐標軸範圍和標籤 ---
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    
+    # --- 【核心修正】反轉Y軸 ---
+    # 無論是否有背景圖，我們都希望Y軸遵循圖像慣例（0在頂部）
+    ax.invert_yaxis()
+    
+    # 隱藏座標軸上的數字標籤，但保留框架
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    ax.tick_params(axis='both', which='both', length=0) # 隱藏刻度線
+
+    if bg_img_np is None:
+        ax.set_aspect(aspect_ratio, adjustable='box')
+
+    # ax.set_xlabel("u (Normalized Width Coordinate)")
+    # ax.set_ylabel("v (Normalized Height Coordinate)")
+    # ax.set_title("Visualization of Sampled Points")
+    ax.grid(True, linestyle='--', alpha=0.4, color='black') # 網格線改為黑色
+    
+    plt.tight_layout()
+
+    # --- 7. 保存並關閉圖形 (保持不变) ---
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0, dpi=300)
+    plt.close()
+    print(f"可視化圖像已保存至: {output_filename}")

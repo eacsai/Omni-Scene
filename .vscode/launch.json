@@ -2,85 +2,20 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug OmniScene Demo",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_nusc_novelview_r50_224x400.py",
-                "--output-dir", "outputs/omni_gs_nusc_novelview_r50_224x400_vis",
-                // "--load-from", "checkpoints/checkpoint-100000"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Debug OmniScene Train MP3D_Panorama",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Debug OmniScene Train MP3D_Panorama_Spherical_conf",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_spherical_cross_conf.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_cross_conf",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
             "name": "Debug OmniScene Train MP3D_Panorama_Decare_Double_Volume",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "args": [
                 // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_decare_double_volume.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_decare_volume",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Pixel",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_pixel.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_pixel",
+                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_decare_volume.py",
+                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_decare_double_volume",
                 // "--resume-from", "path/to/checkpoints"
             ],
             "console": "integratedTerminal",
         },
         {
             "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_Pixel",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_pixel.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_Pixel_Random",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
@@ -106,33 +41,7 @@
             "console": "integratedTerminal",
         },
         {
-            "name": "Debug OmniScene Eval MP3D_Panorama_Cylinder_Double_Pixel",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_pixel_val.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_new",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Debug OmniScene Eval MP3D_Panorama_Cylinder_Double_Volume",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_volume_val.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_Volume_Random",
+            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_Volume",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
@@ -145,7 +54,7 @@
             "console": "integratedTerminal",
         },
         {
-            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_All_Random",
+            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_All",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
@@ -157,19 +66,6 @@
             ],
             "console": "integratedTerminal",
         },  
-        {
-            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Pixel",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_pixel.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_pixel",
-                // "--resume-from", "path/to/checkpoints"
-            ],
-            "console": "integratedTerminal",
-        },
         {
             "name": "Debug OmniScene Train 360Loc_Panorama_Double_All",
             "type": "debugpy",
@@ -188,7 +84,7 @@
             "program": "${file}",
             "args": [
                 // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_spherical_double_volume.py",
+                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_spherical_volume.py",
                 "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_spherical_Double_Volume",
                 // "--load-from", "checkpoint-24000"
             ],
@@ -246,19 +142,6 @@
             ],
             "console": "integratedTerminal",
         },        
-        {
-            "name": "Debug OmniScene Test MP3D_Panorama_Spherical",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_decare.py",
-                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_Spherical_decare",
-                "--load-from", "checkpoint-33000"
-            ],
-            "console": "integratedTerminal",
-        },
         {
             "name": "Debug OmniScene Test MP3D_Panorama_Spherical_Double",
             "type": "debugpy",

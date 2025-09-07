@@ -1,6 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -148,7 +148,11 @@ def main(args):
     if path:
         accelerator.print(f"Resuming from checkpoint {path}")
         state_dict = load_file(path, device="cpu")
-        my_model.load_state_dict(state_dict)
+        model_dict = my_model.state_dict()
+
+        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        model_dict.update(filtered_dict)
+        my_model.load_state_dict(model_dict)
         accelerator.print("Model weights loaded successfully before prepare().")
     
     my_model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(

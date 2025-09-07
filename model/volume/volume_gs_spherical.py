@@ -6,7 +6,7 @@ from mmengine.model import BaseModule
 from mmengine.registry import MODELS
 import warnings
 from einops import rearrange
-from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap
+from vis_feat import single_features_to_RGB, visualize_counts_as_heatmap, features_to_blocky_heatmap
 import math
 
 @MODELS.register_module()
@@ -61,7 +61,7 @@ class VolumeGaussianSpherical(BaseModule):
                 x = candidate_xyzs_i[..., 0]
                 y = candidate_xyzs_i[..., 1]
                 z = candidate_xyzs_i[..., 2]
-                candidate_thetas_i = (self.tpv_theta * (torch.atan2(x, z) + torch.pi)/(2 * torch.pi) - eps).int()
+                candidate_thetas_i = (self.tpv_theta * (torch.atan2(x, z + eps) + torch.pi)/(2 * torch.pi) - eps).int()
                 candidate_phis_i = (self.tpv_phi * (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps))  + torch.pi/2) / torch.pi - eps).int()
                 candidate_rs_i = (self.tpv_r * torch.sqrt(x**2 + y**2 + z**2 + eps) / self.pc_rrange - eps).int()
                 
@@ -139,9 +139,12 @@ class VolumeGaussianSpherical(BaseModule):
         #                             cmap_name='Blues'
         #                             )
 
+        # features_to_blocky_heatmap(project_feats_thetaphi, img_name='feat_thetaphi.png', cmap_name='Blues', final_w=128, idx=1)
+        # features_to_blocky_heatmap(project_feats_rtheta, img_name='feat_rtheta.png', cmap_name='Greens', final_w=512, idx=1)
+        # features_to_blocky_heatmap(project_feats_phir, img_name='feat_phir.png', cmap_name='Reds', final_w=512, idx=1)
 
         if self.use_checkpoint and status != "test":
-            input_vars_enc = (img_feats, project_feats, img_metas)
+            input_vars_enc = (img_feats, project_feats, img_metas, img_color)
             outs = torch.utils.checkpoint.checkpoint(
                 self.encoder, *input_vars_enc, use_reentrant=False
             )
@@ -154,7 +157,7 @@ class VolumeGaussianSpherical(BaseModule):
                 use_reentrant=False,
             )
         else:
-            outs = self.encoder(img_feats, project_feats, img_metas)
+            outs = self.encoder(img_feats, project_feats, img_metas, img_color)
             gaussians = self.gs_decoder(
                 outs, 
                 img_color, 

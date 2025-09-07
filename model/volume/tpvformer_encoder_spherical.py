@@ -8,68 +8,7 @@ from torch.nn.init import normal_
 from .cross_view_hybrid_attention import TPVCrossViewHybridAttention
 from .image_cross_attention import TPVMSDeformableAttention3D
 from einops import rearrange
-
-def show_vis_points(reference_points_cam, idx=[0,1], point_size=5):
-    vis_points = reference_points_cam[0,0,:,idx,:].view(-1, 2)
-    # 1. 将Tensor转换为NumPy数组 (如果它在GPU上，先移到CPU)
-    if vis_points.is_cuda:
-        points_np = vis_points.cpu().numpy()
-    else:
-        points_np = vis_points.numpy()
-
-    u_coords = points_np[:, 0]
-    v_coords = points_np[:, 1]
-
-    # 2. 设置图形和坐标轴
-    # 我们希望图形的显示宽度是高度的两倍。
-    # figsize 的单位是英寸。例如，10英寸宽，5英寸高。
-    fig_width_inches = 10
-    fig_height_inches = fig_width_inches / 2
-
-    fig, ax = plt.subplots(figsize=(fig_width_inches, fig_height_inches))
-
-    # 3. 绘制散点图
-    # s: 点的大小, marker: 点的形状
-    ax.scatter(u_coords, v_coords, s=point_size, marker='.')
-
-    # 4. 设置坐标轴范围和标签
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1) # v 坐标通常从下往上增加
-
-    # 如果希望 (0,0) 在左上角，y轴向下增加（像图片一样），可以反转y轴：
-    # ax.invert_yaxis()
-    # 但通常对于归一化坐标的可视化，保持y轴向上更直观。
-
-    ax.set_xlabel("u (Normalized Width Coordinate)")
-    ax.set_ylabel("v (Normalized Height Coordinate)")
-    ax.set_title("Visualization of Sampled Points (2:1 Aspect Ratio)")
-
-    # 5. 设置坐标轴的宽高比
-    # ax.set_aspect('equal') 会使得x轴的一个单位长度等于y轴的一个单位长度。
-    # 我们希望的是整个绘图区域（由xlim和ylim定义）呈现2:1的宽高比。
-    # 由于我们的figsize已经设置了2:1，并且xlim和ylim都是[0,1]，
-    # 'auto' 或不设置通常能工作。但为了更精确控制数据的显示比例：
-    # aspect = (data_y_range / figure_height_inches) / (data_x_range / figure_width_inches)
-    # 对于我们的情况，data_x_range = 1, data_y_range = 1.
-    # aspect = (1 / fig_height_inches) / (1 / fig_width_inches)
-    # aspect = fig_width_inches / fig_height_inches = 2.0 (这是Y单位相对于X单位的比例)
-    # 不对，ax.set_aspect() 设置的是 `data_units_y / data_units_x` 的显示比例。
-    # 如果我们希望x轴的[0,1]范围在视觉上是y轴[0,1]范围的两倍长，
-    # 那么 y的一个数据单位的视觉长度 应该是 x的一个数据单位视觉长度的 0.5 倍。
-    ax.set_aspect(0.5, adjustable='box')
-    # 'adjustable="box"' 意味着通过调整绘图框的尺寸来达到这个比例。
-
-    # ax.set_aspect('auto') # 另一种选择，让它自动适应figsize
-
-    # 添加网格线以便更好地观察分布
-    ax.grid(True, linestyle='--', alpha=0.7)
-
-    # 调整布局以防止标签被裁剪
-    plt.tight_layout()
-
-    # 6. 显示图形
-    plt.savefig('sample.png')
-    plt.close()
+from vis_feat import single_features_to_RGB, show_vis_points
 
 @MODELS.register_module()
 class TPVFormerEncoderSpherical(TransformerLayerSequence):
@@ -322,7 +261,7 @@ class TPVFormerEncoderSpherical(TransformerLayerSequence):
 
         return reference_points_cam, tpv_mask
 
-    def pano_point_sampling(self, reference_points, pc_range, img_metas):
+    def pano_point_sampling(self, reference_points, pc_range, img_metas, img_ori):
         B = len(img_metas)
         # init reference_points
         # ori_reference_points = reference_points.clone().permute(0,2,1,3).repeat(B, 1, 1, 1).unsqueeze(0)
@@ -360,9 +299,15 @@ class TPVFormerEncoderSpherical(TransformerLayerSequence):
         x = spherical_reference_points[...,0:1]
         y = spherical_reference_points[...,1:2]
         z = spherical_reference_points[...,2:3]
-        theta = (torch.atan2(x, z) + torch.pi)/(2 * torch.pi)
+        theta = (torch.atan2(x, z + eps) + torch.pi)/(2 * torch.pi)
         phi = (torch.atan2(y, torch.sqrt(x**2 + z**2 + eps)) + torch.pi/2)/torch.pi
         reference_points_cam = torch.cat((theta, phi), dim=-1).permute(1,0,3,2,4)
+
+        # if reference_points_cam.shape[3] == 8:
+        #     for i in range(8):
+        #         gap = reference_points_cam.shape[3] / 8
+        #         sample_idx = int(i * gap)
+        #         show_vis_points(reference_points_cam, sample_idx, background_image=img_ori[0,0], output_filename=f'vis/spherical/feat_thetaphi{sample_idx}')
 
         tpv_mask = (
             (reference_points_cam[..., 1:2] > 0.0)
@@ -374,7 +319,7 @@ class TPVFormerEncoderSpherical(TransformerLayerSequence):
 
         return reference_points_cam, tpv_mask
 
-    def forward(self, mlvl_feats, project_feats, img_metas):
+    def forward(self, mlvl_feats, project_feats, img_metas, img_ori):
         """Forward function.
 
         Args:
@@ -435,7 +380,7 @@ class TPVFormerEncoderSpherical(TransformerLayerSequence):
         for ref_3d in ref_3ds:
             reference_points_cam, tpv_mask = self.pano_point_sampling(
                 ref_3d, self.pc_range,
-                img_metas)  # num_cam, bs, hw++, #p, 2
+                img_metas, img_ori)  # num_cam, bs, hw++, #p, 2
             reference_points_cams.append(reference_points_cam)
             tpv_masks.append(tpv_mask)
 
