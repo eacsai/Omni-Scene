@@ -440,6 +440,7 @@ class OmniGaussianSphericalVolume(BaseModule):
                                           depths_in=data_dict["depths"], 
                                           confs_in=data_dict["confs"], 
                                           pluckers=data_dict["pluckers"],
+                                          viewmats=data_dict["c2ws"],
                                           status="test"
                                         )
         # pixel-gs prediction

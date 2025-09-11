@@ -1,6 +1,4 @@
 import os, time, argparse, os.path as osp, numpy as np
-os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -19,9 +17,8 @@ from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
 from safetensors.torch import load_file
-import torch.optim as optim
 
-from data.mp3d_dataloader_double import load_MP3D_data
+from data.mp3d_dataloader_double_512 import load_MP3D_data
 # from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
@@ -144,18 +141,6 @@ def main(args):
 
     train_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='train')
     val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='val')
-
-    # optimizer = my_model.configure_optimizers(cfg.lr)
-    # scheduler = optim.lr_scheduler.OneCycleLR(
-    #     optimizer,
-    #     max_lr=cfg.lr,
-    #     total_steps=len(train_dataloader) * max_num_epochs + 100,  # 稍微增加一点以确保覆盖所有步数
-    #     pct_start=0.01,
-    #     cycle_momentum=False,
-    #     anneal_strategy='cos',
-    #     div_factor=25.0,
-    #     final_div_factor=1e4,
-    # )
     
     path = cfg.resume_from
     if path:
@@ -195,7 +180,7 @@ def main(args):
             data_time_e = time.time()
             with accelerator.accumulate(my_model):
                 optimizer.zero_grad()
-                loss, log, _, _, _, _, _, _, _ = my_model.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
+                loss, log, _, _, _, _, _, _, _ = my_model.module.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
                 # loss, log, _, _, _, _, _, _, _ = my_model.module.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
 
                 accelerator.backward(loss)
@@ -204,13 +189,7 @@ def main(args):
                     grad_norm = accelerator.clip_grad_norm_(my_model.parameters(), cfg.grad_max_norm)
                 optimizer.step()
                 scheduler.step()
-
-                # for name, param in my_model.named_parameters():
-                #     if param.grad is not None:
-                #         # 检查梯度张量中是否存在非零元素
-                #         if (param.grad != 0).any():
-                #             print(name)
-
+            
             # Checks if the accelerator has performed an optimization step behind the scenes
             accelerator.wait_for_everyone()
             if accelerator.sync_gradients and accelerator.is_main_process:
@@ -229,7 +208,7 @@ def main(args):
                         for i_iter_val, batch_val in enumerate(val_dataloader):
                             val_batch_save_dir = osp.join(cfg.output_dir, cfg.exp_name, "validation",
                                                 "step-{}/batch-{}".format(global_iter, i_iter_val))
-                            log_val = my_model.validation_step(batch_val, val_batch_save_dir)
+                            log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
                             # log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
                             log.update(log_val)
                     my_model.train()

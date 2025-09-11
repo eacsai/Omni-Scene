@@ -19,6 +19,13 @@ from .multiview_transformer import MultiViewFeatureTransformer
 # from .multiview_transformer_prope import MultiViewFeatureTransformer
 
 
+class Swish(nn.Module):
+    def __init__(self):
+        super(Swish, self).__init__()
+
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
 def feature_add_position_list(features_list, attn_splits, feature_channels):
     pos_enc = PositionEmbeddingSine(num_pos_feats=feature_channels // 2)
 
@@ -41,6 +48,110 @@ def feature_add_position_list(features_list, attn_splits, feature_channels):
 
     return out_features_list
 
+def init_bn(module):
+    if module.weight is not None:
+        nn.init.ones_(module.weight)
+    if module.bias is not None:
+        nn.init.zeros_(module.bias)
+    return
+
+
+def init_uniform(module, init_method):
+    if module.weight is not None:
+        if init_method == "kaiming":
+            nn.init.kaiming_uniform_(module.weight)
+        elif init_method == "xavier":
+            nn.init.xavier_uniform_(module.weight)
+    return
+
+class Conv2d(nn.Module):
+    """Applies a 2D convolution (optionally with batch normalization and relu activation)
+    over an input signal composed of several input planes.
+
+    Attributes:
+        conv (nn.Module): convolution module
+        bn (nn.Module): batch normalization module
+        relu (bool): whether to activate by relu
+
+    Notes:
+        Default momentum for batch normalization is set to be 0.01,
+
+    """
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 relu=True, bn=True, bn_momentum=0.1, norm_type='IN', **kwargs):
+        super(Conv2d, self).__init__()
+
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, bias=(not bn), **kwargs)
+        self.kernel_size = kernel_size
+        self.stride = stride
+        if norm_type == 'IN':
+            self.bn = nn.InstanceNorm2d(out_channels, momentum=bn_momentum) if bn else None
+        elif norm_type == 'BN':
+            self.bn = nn.BatchNorm2d(out_channels, momentum=bn_momentum) if bn else None
+        self.relu = relu
+
+    def forward(self, x):
+        y = self.conv(x)
+        if self.bn is not None:
+            y = self.bn(y)
+        if self.relu:
+            y = F.leaky_relu(y, 0.1, inplace=True)
+        return y
+
+    def init_weights(self, init_method):
+        """default initialization"""
+        init_uniform(self.conv, init_method)
+        if self.bn is not None:
+            init_bn(self.bn)
+
+
+class FPNEncoder(nn.Module):
+    def __init__(self, feat_chs, norm_type='BN'):
+        self.feat_chs = feat_chs
+        super(FPNEncoder, self).__init__()
+        self.conv00 = Conv2d(3, feat_chs[0], 7, 1, padding=3, norm_type=norm_type)
+        self.conv01 = Conv2d(feat_chs[0], feat_chs[0], 5, 1, padding=2, norm_type=norm_type)
+
+        for i, c in enumerate(feat_chs[1:]):
+            setattr(self, f'downsample{i+1}', Conv2d(feat_chs[i], c, 5 if i < 2 else 3, 2, padding=2 if i < 2 else 1, norm_type=norm_type))
+            setattr(self, f'conv{i+1}0', Conv2d(c, c, 3, 1, padding=1, norm_type=norm_type))
+            setattr(self, f'conv{i+1}1', Conv2d(c, c, 3, 1, padding=1, norm_type=norm_type))
+
+    def forward(self, x):
+        x = self.conv00(x)
+        x = self.conv01(x)
+        output = [x]
+
+        for i in range(1, len(self.feat_chs)):
+            x = getattr(self, f'downsample{i}')(x)
+            x = getattr(self, f'conv{i}0')(x)
+            x = getattr(self, f'conv{i}1')(x)
+            output.append(x)
+
+        return output
+
+class FPNDecoder(nn.Module):
+    def __init__(self, feat_chs):
+        super(FPNDecoder, self).__init__()
+        feat_chs = feat_chs[::-1]
+        final_ch = feat_chs[0]
+        self.out0 = nn.Sequential(nn.Conv2d(final_ch, feat_chs[0], kernel_size=1), nn.BatchNorm2d(feat_chs[0]), Swish())
+
+        for i, c in enumerate(feat_chs[1:]):
+            setattr(self, f'inner{i+1}', nn.Conv2d(c, final_ch, 1))
+            setattr(self, f'out{i+1}', nn.Sequential(nn.Conv2d(final_ch, c, kernel_size=3, padding=1), nn.BatchNorm2d(c), Swish()))
+
+    def forward(self, xs):
+        intra_feat = xs[-1]
+        output = [self.out0(intra_feat)]
+
+        for i in range(1, len(xs)):
+            intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="bilinear", align_corners=True) + getattr(self, f'inner{i}')(xs[-i-1])
+            output.append(getattr(self, f'out{i}')(intra_feat))
+
+        return output
+
 @dataclass
 class BackboneResnetCfg:
     name: Literal["resnet"]
@@ -55,74 +166,74 @@ class BackboneResnetCfg:
 class BackboneResnet(Backbone[BackboneResnetCfg]):
     model: ResNet
 
-    def __init__(self, d_in: int = 3, num_cams: int = 6, attn_splits: int = 2, no_cross_attn: bool = False) -> None:
+    def __init__(
+        self,
+        feature_channels=128,
+        num_transformer_layers=6,
+        ffn_dim_expansion=4,
+        no_cross_attn=False,
+        num_head=1,
+        ) -> None:
         super().__init__()
+        self.feature_channels = feature_channels
+        # Table 3: w/o cross-view attention
+        self.no_cross_attn = no_cross_attn
+        # Table B: w/ Epipolar Transformer
 
-        assert d_in == 3
-        self.num_layers = 4
-        self.use_epipolar_transformer = True
-        self.attn_splits = attn_splits
-        self.model = torch.hub.load("facebookresearch/dino:main", "dino_resnet50", trust_repo=True)
-        self.plucker_to_embed = nn.Linear(6, 512)
-        self.cams_embeds = nn.Parameter(torch.empty(num_cams, 512))
-        nn.init.normal_(self.cams_embeds, mean=0.0, std=0.02) # 使用正态分布初始化
-        # Set up projections
-        self.projections = nn.ModuleDict({})
-        for index in range(1, self.num_layers):
-            key = f"layer{index}"
-            block = getattr(self.model, key)
-            conv_index = 1
-            try:
-                while True:
-                    d_layer_out = getattr(block[-1], f"conv{conv_index}").out_channels
-                    conv_index += 1
-            except AttributeError:
-                pass
-            self.projections[key] = nn.Conv2d(d_layer_out, 512, 1)
-
-        # Add a projection for the first layer.
-        self.projections["layer0"] = nn.Conv2d(
-            self.model.conv1.out_channels, 512, 1
-        )
-        self.backbone_projection = nn.Sequential(
-            nn.ReLU(),
-            nn.Conv2d(512 + 2, 128, kernel_size=1, bias=True),
-        )
-        self.high_resolution_skip = nn.Sequential(
-            nn.Conv2d(3, 128, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3)),
-            nn.ReLU(),
-        )   
-
-        # downscaler
-        self.downscaler = nn.Conv2d(128, 128, kernel_size=(4, 4), stride=(4, 4))
+        self.encoder = FPNEncoder(feat_chs=feature_channels[::-1])
+        self.decoder = FPNDecoder(feat_chs=feature_channels[::-1])
 
         self.transformer = MultiViewFeatureTransformer(
-            num_layers=4,
-            d_model=128,
-            nhead=1,
-            ffn_dim_expansion=4,
-            image_height=160,
-            image_width=320,
+            num_layers=num_transformer_layers,
+            d_model=feature_channels[0],
+            nhead=num_head,
+            ffn_dim_expansion=ffn_dim_expansion,
+            no_cross_attn=no_cross_attn,
         )
 
-        # upscaler
-        self.upscaler = nn.Sequential(
-            nn.ConvTranspose2d(
-                128, 128, kernel_size=(4, 4), stride=(4, 4)
-            ),
-        )
+    def normalize_images(self, images):
+        '''Normalize image to match the pretrained GMFlow backbone.
+            images: (B, N_Views, C, H, W)
+        '''
+        shape = [*[1]*(images.dim() - 3), 3, 1, 1]
+        mean = torch.tensor([0.485, 0.456, 0.406]).reshape(
+            *shape).to(images.device)
+        std = torch.tensor([0.229, 0.224, 0.225]).reshape(
+            *shape).to(images.device)
 
-        self.upscale_refinement = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3)),
-            nn.GELU(approximate='none'),
-            nn.Conv2d(256, 128, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3)),
-        )
+        return (images - mean) / std
 
-        # self.upscale_refinement = nn.Sequential(
-        #     nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-        #     nn.GELU(approximate='none'),
-        #     nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
-        # )
+    def extract_feature(self, images):
+        b, v = images.shape[:2]
+        concat = rearrange(images, "b v c h w -> (b v) c h w")
+
+        # list of [nB, C, H, W], resolution from high to low
+        features = self.encoder(concat)
+        if not isinstance(features, list):
+            features = [features]
+        # reverse: resolution from low to high
+        features = features[::-1]
+
+        features_list = [[] for _ in range(v)]
+        for feature in features:
+            feature = rearrange(feature, "(b v) c h w -> b v c h w", b=b, v=v)
+            for idx in range(v):
+                features_list[idx].append(feature[:, idx])
+
+        return features_list
+
+    def decode_feature(self, features):
+        b, v = features[0].shape[:2]
+        features_list = []
+        for feature in features:
+            feature = rearrange(feature, "b v c h w -> (b v) c h w", b=b, v=v)
+            features_list.append(feature)
+        features_list = self.decoder(features_list[::-1])
+        features = []
+        for feature in features_list:
+            feature = rearrange(feature, "(b v) c h w -> b v c h w", b=b, v=v)
+            features.append(feature)
+        return features
 
     def forward(
         self,
@@ -131,84 +242,37 @@ class BackboneResnet(Backbone[BackboneResnetCfg]):
         confs_in, 
         pluckers,
         viewmats,
+        attn_splits=2,
     ) -> Float[Tensor, "batch view d_out height width"]:
-        # Merge the batch dimensions.
-        b, v, c, h, w = img.shape
-        viewmats = viewmats.inverse()
-        x = rearrange(img, "b v c h w -> (b v) c h w")
-        
-        skip = self.high_resolution_skip(x)
-        # Layer 0
-        x0 = self.model.conv1(x)
-        x0 = self.model.bn1(x0)
-        x0 = self.model.relu(x0)
+        ''' images: (B, N_Views, C, H, W), range [0, 1] '''
+        # resolution low to high
+        features_list = self.extract_feature(
+            self.normalize_images(img)
+        )  # list of features
 
-        x1 = self.model.layer1(x0)
-        x2 = self.model.layer2(x1)
-        x3 = self.model.layer3(x2)
+        cur_features_list = [x[0] for x in features_list]
 
-        p4 = self.projections["layer3"](x3)
-        p3 = F.interpolate(p4, size=x2.shape[-2:], mode="bilinear", align_corners=True)
-        p3 = p3 + self.projections["layer2"](x2)
-        p2 = F.interpolate(p3, size=x1.shape[-2:], mode="bilinear", align_corners=True)
-        p2 = p2 + self.projections["layer1"](x1)
-        p1 = F.interpolate(p2, size=x0.shape[-2:], mode="bilinear", align_corners=True)
-        p1 = p1 + self.projections["layer0"](x0)
+        # add position to features
+        cur_features_list = feature_add_position_list(
+            cur_features_list, attn_splits, self.feature_channels[0])
 
-        features = F.interpolate(p1, (h, w), mode="bilinear", align_corners=True)
-    
-        pluckers = rearrange(pluckers, "b v c h w -> (b v) h w c")
-        plucker_embeds = self.plucker_to_embed(pluckers)
-        plucker_embeds = rearrange(plucker_embeds, "(b v) h w c -> b v c h w", b=b, v=v)
-        
-        features = rearrange(features, "(b v) c h w -> b v c h w", b=b, v=v)
-        features = features + self.cams_embeds[None, :v, :, None, None] + plucker_embeds
-        # features = features + plucker_embeds
-        features = rearrange(features, "b v c h w -> (b v) c h w")
-        
-        # rearrange pseudo depths and confs
-        depths_in = rearrange(depths_in, "b v c h w -> (b v) c h w")
-        confs_in = rearrange(confs_in, "b v c h w -> (b v) c h w")
-        depth_scale = 2.0
+        # Transformer
+        cur_features_list = self.transformer(
+            cur_features_list, attn_num_splits=attn_splits
+        )
 
-        features = torch.cat([features, depths_in / depth_scale, confs_in], dim=1)
-        features = self.backbone_projection(features)
+        cur_features = torch.stack(cur_features_list, dim=1)  # [B, V, C, H, W]
+        cnn_features = []
+        for idx in range(len(features_list[0])):
+            cnn_features.append(torch.stack([x[idx] for x in features_list], dim=1))
+        features = cnn_features.copy()
+        features[0] = cur_features
+        features = self.decode_feature(features)
 
-        # downscale
-        features = self.downscaler(features)
-        features = rearrange(features, "(b v) c h w -> b v c h w", b=b, v=v)
-        
-        # Apply cross-view attention.
-        features_list = list(torch.unbind(features, dim=1))
-        viewmats_lsit = list(torch.unbind(viewmats, dim=1))
-        Ks_list = v * [None]
-        # Apply sin position embedding.
-        # cur_features_list = feature_add_position_list(features_list, self.attn_splits, 128)
-        # cur_features_list = self.transformer(cur_features_list, attn_num_splits=self.attn_splits)
-
-        # Apply RoPE position embedding.
-        cur_features_list = self.transformer(features_list, attn_num_splits=self.attn_splits)
-
-        # Apply PRoPE position embedding.
-        # cur_features_list = self.transformer(features_list, viewmats_lsit, Ks_list)
-
-        features = torch.stack(cur_features_list, dim=1)  # [B, V, C, H, W]
-
-        # upscale
-        features = rearrange(features, "b v c h w -> (b v) c h w")
-        features = self.upscaler(features)
-        features = self.upscale_refinement(features) + features
-
-        # # Run the epipolar transformer.
-        # if self.use_epipolar_transformer:
-        #     features, sampling = self.epipolar_transformer(
-        #         features,
-        #         context["extrinsics"],
-        #     )
-
-        features = features + skip
-        # Separate batch dimensions.
-        return rearrange(features, "(b v) c h w -> b v c h w", b=b, v=v)
+        return {
+            "trans_features": features,
+            "cnn_features": cnn_features,
+        }
 
     @property
     def d_out(self) -> int:

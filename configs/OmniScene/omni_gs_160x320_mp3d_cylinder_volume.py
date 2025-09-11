@@ -23,7 +23,8 @@ warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
 # resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_cam/checkpoint-36000/model.safetensors'
-resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume/checkpoint-36000/model.safetensors'
+# resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume/checkpoint-36000/model.safetensors'
+resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_random2/checkpoint-36000/model.safetensors'
 # resume_from = False
 report_to = "tensorboard"
 

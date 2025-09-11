@@ -1,6 +1,4 @@
 import os, time, argparse, os.path as osp, numpy as np
-os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -8,6 +6,7 @@ from einops import rearrange
 from diffusers.optimization import get_scheduler
 import math
 import data.dataloader as datasets
+from safetensors.torch import load_file
 
 import mmcv
 import mmengine
@@ -18,10 +17,8 @@ import logging
 from datetime import timedelta
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration, InitProcessGroupKwargs
-from safetensors.torch import load_file
-import torch.optim as optim
 
-from data.mp3d_dataloader_double import load_MP3D_data
+from data.loc360_dataloader_double_all_512 import load_360Loc_data
 # from data.mp3d_dataloader_double import load_MP3D_data
 # from data.vigor_dataloader_cube import load_vigor_data
 
@@ -142,32 +139,8 @@ def main(args):
     #     num_workers=dataset_config.num_workers_val
     # )
 
-    train_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='train')
-    val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='val')
-
-    # optimizer = my_model.configure_optimizers(cfg.lr)
-    # scheduler = optim.lr_scheduler.OneCycleLR(
-    #     optimizer,
-    #     max_lr=cfg.lr,
-    #     total_steps=len(train_dataloader) * max_num_epochs + 100,  # 稍微增加一点以确保覆盖所有步数
-    #     pct_start=0.01,
-    #     cycle_momentum=False,
-    #     anneal_strategy='cos',
-    #     div_factor=25.0,
-    #     final_div_factor=1e4,
-    # )
-    
-    path = cfg.resume_from
-    if path:
-        accelerator.print(f"Resuming from checkpoint {path}")
-        state_dict = load_file(path, device="cpu")
-        model_dict = my_model.state_dict()
-
-        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
-        model_dict.update(filtered_dict)
-        my_model.load_state_dict(model_dict)
-        accelerator.print("Model weights loaded successfully before prepare().")
-    
+    train_dataloader = load_360Loc_data(dataset_config.batch_size_train, stage='train')
+    val_dataloader = load_360Loc_data(dataset_config.batch_size_train, stage='val')
     my_model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
         my_model, optimizer, train_dataloader, val_dataloader, scheduler
     )
@@ -179,11 +152,33 @@ def main(args):
     epoch = 0
     global_iter = 0
     first_epoch = 0
+
+    # Potentially load in the weights and states from a previous save
+    if args.resume_from:
+        cfg.resume_from = args.resume_from
+    if cfg.resume_from:
+        if cfg.resume_from != "latest":
+            path = os.path.basename(cfg.resume_from)
+        else:
+            # Get the most recent checkpoint
+            dirs = os.listdir(cfg.work_dir)
+            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            if len(dirs) > 0:
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1]
+            else:
+                path = None
+
+    path = cfg.resume_from
+    if path:
+        accelerator.print(f"Resuming from checkpoint {path}")
+        state_dict = load_file(path, device="cpu")
+        my_model.load_state_dict(state_dict)
+        accelerator.print("Model weights loaded successfully before prepare().")
     
     print('work dir: ', args.work_dir)
     
     # training
-    # torch.autograd.set_detect_anomaly(True)
     print_freq = cfg.print_freq
 
     while epoch < max_num_epochs:
@@ -204,13 +199,7 @@ def main(args):
                     grad_norm = accelerator.clip_grad_norm_(my_model.parameters(), cfg.grad_max_norm)
                 optimizer.step()
                 scheduler.step()
-
-                # for name, param in my_model.named_parameters():
-                #     if param.grad is not None:
-                #         # 检查梯度张量中是否存在非零元素
-                #         if (param.grad != 0).any():
-                #             print(name)
-
+            
             # Checks if the accelerator has performed an optimization step behind the scenes
             accelerator.wait_for_everyone()
             if accelerator.sync_gradients and accelerator.is_main_process:

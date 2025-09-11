@@ -18,14 +18,107 @@ import logging
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration
-from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc, compute_absrel
+from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc, compute_absrel, WSPSNR
 from tools.visualization import depths_to_colors
 from safetensors.torch import load_file
 
 from data.mp3d_dataloader_double import load_MP3D_data
-
+import torch.nn as nn
+from typing import Optional
 import warnings
 warnings.filterwarnings("ignore")
+
+def get_model_summary(model: nn.Module) -> str:
+    """
+    生成一个详细的模型摘要，模仿 PyTorch Lightning 的格式。
+
+    Args:
+        model (nn.Module): 需要分析的 PyTorch 模型。
+
+    Returns:
+        str: 格式化好的模型摘要字符串。
+    """
+    
+    # --- 1. 统计所有参数和模组状态 ---
+    total_params = 0
+    trainable_params = 0
+    train_mode_modules = 0
+    eval_mode_modules = 0
+
+    # 使用 model.modules() 递归遍历所有子模组
+    for module in model.modules():
+        if module.training:
+            train_mode_modules += 1
+        else:
+            eval_mode_modules += 1
+            
+    # 使用 model.parameters() 遍历所有参数
+    for p in model.parameters():
+        total_params += p.numel()
+        if p.requires_grad:
+            trainable_params += p.numel()
+            
+    non_trainable_params = total_params - trainable_params
+    
+    # --- 2. 准备顶层结构表 ---
+    # 使用 model.named_children() 只遍历模型的直接子模组
+    table_data = []
+    top_level_total_params = 0
+    
+    # 辅助函数，用于计算一个模组内的总参数
+    def count_module_params(module: nn.Module) -> int:
+        return sum(p.numel() for p in module.parameters())
+
+    for i, (name, module) in enumerate(model.named_children()):
+        params = count_module_params(module)
+        top_level_total_params += params
+        mode = "train" if module.training else "eval"
+        table_data.append(
+            (
+                i,
+                name,
+                module.__class__.__name__,
+                f"{params / 1e6:.1f} M" if params > 0 else "0",
+                mode
+            )
+        )
+        
+    # --- 3. 格式化输出字符串 ---
+    
+    # 定义列宽
+    col_widths = [3, 25, 25, 12, 8] # 序号, 名称, 类型, 参数, 模式
+
+    # 构建分隔线
+    separator = "-" * (sum(col_widths) + len(col_widths) - 1)
+    
+    # 拼接结果
+    summary_lines = []
+    
+    # 表头
+    header = f"{' ':<{col_widths[0]}} | {'Name':<{col_widths[1]}} | {'Type':<{col_widths[2]}} | {'Params':>{col_widths[3]}} | {'Mode':<{col_widths[4]}}"
+    summary_lines.append(header)
+    summary_lines.append(separator)
+
+    # 表格内容
+    for row in table_data:
+        line = f"{row[0]:<{col_widths[0]}} | {row[1]:<{col_widths[1]}} | {row[2]:<{col_widths[2]}} | {row[3]:>{col_widths[3]}} | {row[4]:<{col_widths[4]}}"
+        summary_lines.append(line)
+        
+    summary_lines.append(separator)
+
+    # 参数统计
+    summary_lines.append(f"{trainable_params / 1e6:<.1f} M    Trainable params")
+    summary_lines.append(f"{non_trainable_params / 1e6:<.1f} M    Non-trainable params")
+    summary_lines.append(f"{total_params / 1e6:<.1f} M    Total params")
+    
+    # 内存和模组统计
+    # 假设为 FP32, 每个参数占 4 bytes
+    memory_mb = total_params * 4 / 1e6 
+    summary_lines.append(f"{memory_mb:<.3f}   Total estimated model params size (MB)")
+    summary_lines.append(f"{train_mode_modules:<8}  Modules in train mode")
+    summary_lines.append(f"{eval_mode_modules:<8}  Modules in eval mode")
+    
+    return "\n".join(summary_lines)
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -98,9 +191,6 @@ def main(args):
     from builder import builder as model_builder
     
     my_model = model_builder.build(cfg.model).to(accelerator.device)
-    n_parameters = sum(p.numel() for p in my_model.parameters() if p.requires_grad)
-    if logger is not None:
-        logger.info(f'Number of params: {n_parameters}')
 
     # generate datasets
     val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='test')
@@ -118,15 +208,11 @@ def main(args):
         path = None
 
     if path:
-        full_path = os.path.join(args.output_dir, path, 'model.safetensors')
+        full_path = os.path.join(args.output_dir, path)
         accelerator.print(f"Resuming from checkpoint {full_path}")
-        state_dict = load_file(full_path, device="cpu")
-        model_dict = my_model.state_dict()
-
-        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
-        model_dict.update(filtered_dict)
-        my_model.load_state_dict(model_dict)
+        accelerator.load_state(full_path, map_location='cpu', strict=False)
         global_iter = int(path.split("-")[1])
+
         print(f'Successfully loaded from iter{global_iter}')
 
     else:
@@ -134,6 +220,14 @@ def main(args):
     
     print('work dir: ', args.output_dir)
     
+    # n_parameters = sum(p.numel() for p in my_model.parameters() if p.requires_grad)
+    # if logger is not None:
+    #     logger.info(f'Number of params: {n_parameters}')
+
+    # 生成并打印摘要
+    summary_str = get_model_summary(my_model)
+    print(summary_str)
+
     # Evaluation
     print_freq = cfg.print_freq
     scene_res = {
@@ -146,10 +240,11 @@ def main(args):
         "replica_0.5": [],
     }
     #time.sleep(10)
+    wspsnr_calculator = WSPSNR()
     time_s = time.time()
     with torch.no_grad():
         my_model.eval()
-        total_psnr, total_ssim, total_lpips, total_pcc = 0.0, 0.0, 0.0, 0.0
+        total_psnr, total_ssim, total_lpips, total_pcc, total_pcc_m = 0.0, 0.0, 0.0, 0.0, 0.0
         total_absrel, total_rmse, total_absrel_ref, total_rmse_ref = 0.0, 0.0, 0.0, 0.0
         for i_iter, batch in enumerate(val_dataloader):
             data_time_e = time.time()
@@ -164,9 +259,14 @@ def main(args):
             gt_depths_m = gts["depth_m"]
             # compute metrics and save results
             # pnsr
-            bv_psnr = compute_psnr(
-                rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
-                rearrange(pred_imgs, "b v c h w -> (b v) c h w")).view(bs, -1)
+            # bv_psnr = compute_psnr(
+            #     rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
+            #     rearrange(pred_imgs, "b v c h w -> (b v) c h w")).view(bs, -1)
+            bv_psnr = wspsnr_calculator.ws_psnr(
+                rearrange(gt_imgs, "b v c h w -> (b v) h w c"),
+                rearrange(pred_imgs, "b v c h w -> (b v) h w c"),
+                max_val=1.0
+            ).view(bs, -1)
             bv_psnr_mean = bv_psnr.mean()
             total_psnr += bv_psnr_mean
             # ssim
@@ -184,10 +284,14 @@ def main(args):
             # pcc
             bv_pcc = compute_pcc(
                 rearrange(gt_depths, "b v c h w -> (b v c) h w"),
-                rearrange(pred_depths, "b v h w -> (b v) h w")
-            )
+                rearrange(pred_depths, "b v h w -> (b v) h w")).view(bs, -1)
             bv_pcc_mean = bv_pcc.mean()
             total_pcc += bv_pcc_mean
+            # bv_pcc_m = compute_pcc(
+            #     rearrange(gt_depths, "b v c h w -> (b v c) h w"),
+            #     rearrange(gt_depths_m, "b v c h w -> (b v c) h w")).view(bs, -1)
+            # bv_pcc_m_mean = bv_pcc_m.mean()
+            # total_pcc_m += bv_pcc_m_mean
             logger.info('[Eval] Batch %d-%d: psnr: %.3f, ssim: %.4f, lpips: %.4f, pcc: %.4f'%(
                     i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
             output_dir = os.path.join(cfg.output_dir, str(global_iter))
@@ -212,12 +316,15 @@ def main(args):
                     v_lpips = bv_lpips[b]
                     v_lpips_mean = v_lpips.mean()
 
+                    v_pcc = bv_pcc[b]
+                    v_pcc_mean = v_pcc.mean()
                     # save scene metric
                     scene_name = batch['scene'][b]
                     scene_res[scene_name].append({
                         "psnr": v_psnr_mean,
                         "ssim": v_ssim_mean,
-                        "lpips": v_lpips_mean
+                        "lpips": v_lpips_mean,
+                        'pcc': v_pcc_mean,
                     })
                     # save visualization results
                     v_pred_imgs = pred_imgs[b]
@@ -239,18 +346,23 @@ def main(args):
             s_psnr = 0
             s_ssim = 0
             s_lpips = 0
+            s_pcc = 0
             for m in res:
                 s_psnr = s_psnr + m['psnr'].item()
                 s_ssim = s_ssim + m['ssim'].item()
                 s_lpips = s_lpips + m['lpips'].item()
+                s_pcc = s_pcc + m['pcc'].item()
             s_psnr = s_psnr / len(res)
             s_ssim = s_ssim / len(res)
             s_lpips = s_lpips / len(res)
-            logger.info(" {} psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}.".format(
+            s_pcc = s_pcc / len(res)
+            logger.info(" {} psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}, pcc: {:.4f}".format(
             s,
             s_psnr,
             s_ssim,
-            s_lpips))
+            s_lpips,
+            s_pcc,
+            ))
 
         total_psnr = accelerator.gather_for_metrics(total_psnr).mean()
         total_ssim = accelerator.gather_for_metrics(total_ssim).mean()

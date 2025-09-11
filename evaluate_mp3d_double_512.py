@@ -1,7 +1,7 @@
 
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -22,7 +22,7 @@ from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc
 from tools.visualization import depths_to_colors
 from safetensors.torch import load_file
 
-from data.mp3d_dataloader import load_MP3D_data
+from data.mp3d_dataloader_double_512 import load_MP3D_data
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -103,7 +103,7 @@ def main(args):
         logger.info(f'Number of params: {n_parameters}')
 
     # generate datasets
-    val_dataloader = load_MP3D_data(dataset_config.batch_size_train, stage='test')
+    val_dataloader = load_MP3D_data(dataset_config.batch_size_test, stage='test')
 
     my_model, val_dataloader = accelerator.prepare(
         my_model, val_dataloader
@@ -150,7 +150,7 @@ def main(args):
     time_s = time.time()
     with torch.no_grad():
         my_model.eval()
-        total_psnr, total_ssim, total_lpips, total_pcc, total_pcc_m = 0.0, 0.0, 0.0, 0.0, 0.0
+        total_psnr, total_ssim, total_lpips, total_pcc = 0.0, 0.0, 0.0, 0.0
         total_absrel, total_rmse, total_absrel_ref, total_rmse_ref = 0.0, 0.0, 0.0, 0.0
         for i_iter, batch in enumerate(val_dataloader):
             data_time_e = time.time()
@@ -190,14 +190,10 @@ def main(args):
             # pcc
             bv_pcc = compute_pcc(
                 rearrange(gt_depths, "b v c h w -> (b v c) h w"),
-                rearrange(pred_depths, "b v h w -> (b v) h w")).view(bs, -1)
+                rearrange(pred_depths, "b v h w -> (b v) h w")
+            )
             bv_pcc_mean = bv_pcc.mean()
             total_pcc += bv_pcc_mean
-            # bv_pcc_m = compute_pcc(
-            #     rearrange(gt_depths, "b v c h w -> (b v c) h w"),
-            #     rearrange(gt_depths_m, "b v c h w -> (b v c) h w")).view(bs, -1)
-            # bv_pcc_m_mean = bv_pcc_m.mean()
-            # total_pcc_m += bv_pcc_m_mean
             logger.info('[Eval] Batch %d-%d: psnr: %.3f, ssim: %.4f, lpips: %.4f, pcc: %.4f'%(
                     i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
             output_dir = os.path.join(cfg.output_dir, str(global_iter))
@@ -222,15 +218,12 @@ def main(args):
                     v_lpips = bv_lpips[b]
                     v_lpips_mean = v_lpips.mean()
 
-                    v_pcc = bv_pcc[b]
-                    v_pcc_mean = v_pcc.mean()
                     # save scene metric
                     scene_name = batch['scene'][b]
                     scene_res[scene_name].append({
                         "psnr": v_psnr_mean,
                         "ssim": v_ssim_mean,
-                        "lpips": v_lpips_mean,
-                        'pcc': v_pcc_mean,
+                        "lpips": v_lpips_mean
                     })
                     # save visualization results
                     v_pred_imgs = pred_imgs[b]
@@ -252,23 +245,18 @@ def main(args):
             s_psnr = 0
             s_ssim = 0
             s_lpips = 0
-            s_pcc = 0
             for m in res:
                 s_psnr = s_psnr + m['psnr'].item()
                 s_ssim = s_ssim + m['ssim'].item()
                 s_lpips = s_lpips + m['lpips'].item()
-                s_pcc = s_pcc + m['pcc'].item()
             s_psnr = s_psnr / len(res)
             s_ssim = s_ssim / len(res)
             s_lpips = s_lpips / len(res)
-            s_pcc = s_pcc / len(res)
-            logger.info(" {} psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}, pcc: {:.4f}".format(
+            logger.info(" {} psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}.".format(
             s,
             s_psnr,
             s_ssim,
-            s_lpips,
-            s_pcc,
-            ))
+            s_lpips))
 
         total_psnr = accelerator.gather_for_metrics(total_psnr).mean()
         total_ssim = accelerator.gather_for_metrics(total_ssim).mean()

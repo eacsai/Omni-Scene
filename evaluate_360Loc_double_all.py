@@ -18,7 +18,7 @@ import logging
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed, convert_outputs_to_fp32, DistributedType, ProjectConfiguration
-from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc, compute_absrel
+from tools.metrics import compute_psnr, compute_ssim, compute_lpips, compute_pcc, compute_absrel, WSPSNR
 from tools.visualization import depths_to_colors
 
 from data.loc360_dataloader_double_all import load_360Loc_data
@@ -130,10 +130,11 @@ def main(args):
     # Evaluation
     print_freq = cfg.print_freq
     #time.sleep(10)
+    wspsnr_calculator = WSPSNR()
     time_s = time.time()
     with torch.no_grad():
         my_model.eval()
-        total_psnr, total_ssim, total_lpips, total_pcc = 0.0, 0.0, 0.0, 0.0
+        total_psnr, total_ws_psnr, total_ssim, total_lpips, total_pcc = 0.0, 0.0, 0.0, 0.0, 0.0
         for i_iter, batch in enumerate(val_dataloader):
             data_time_e = time.time()
             # preds, gts = my_model.module.forward_test(batch)
@@ -151,7 +152,14 @@ def main(args):
                 rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
                 rearrange(pred_imgs, "b v c h w -> (b v) c h w")).view(bs, -1)
             bv_psnr_mean = bv_psnr.mean()
-            total_psnr += bv_psnr_mean
+            total_psnr += bv_psnr_mean            
+            # ws_pnsr
+            bv_ws_psnr = wspsnr_calculator.ws_psnr(
+                rearrange(gt_imgs, "b v c h w -> (b v) h w c"),
+                rearrange(pred_imgs, "b v c h w -> (b v) h w c"),
+                max_val=1.0).view(bs, -1)
+            bv_ws_psnr_mean = bv_ws_psnr.mean()
+            total_ws_psnr += bv_ws_psnr_mean
             # ssim
             bv_ssim = compute_ssim(
                 rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
@@ -171,8 +179,8 @@ def main(args):
             )
             bv_pcc_mean = bv_pcc.mean()
             total_pcc += bv_pcc_mean
-            logger.info('[Eval] Batch %d-%d: psnr: %.3f, ssim: %.4f, lpips: %.4f, pcc: %.4f'%(
-                    i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
+            logger.info('[Eval] Batch %d-%d: psnr: %.3f, ws_psnr: %.3f, ssim: %.4f, lpips: %.4f, pcc: %.4f'%(
+                    i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_ws_psnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
             output_dir = os.path.join(cfg.output_dir, str(global_iter))
             os.makedirs(output_dir, exist_ok=True)
             # if cfg.eval_args.save_ply:
@@ -184,17 +192,6 @@ def main(args):
             #         save_ply(gaussians, ply_path, crop_range=None)
             if cfg.eval_args.save_vis:
                 for b in range(bs):
-                    # get psnr for this batch sample
-                    v_psnr = bv_psnr[b]
-                    v_psnr_mean = v_psnr.mean()
-                    v_psnr_str = "%.2f" % v_psnr_mean.item()
-                    # get ssim for this batch sample
-                    v_ssim = bv_ssim[b]
-                    v_ssim_mean = v_ssim.mean()
-                    # get lpips for this batch sample
-                    v_lpips = bv_lpips[b]
-                    v_lpips_mean = v_lpips.mean()
-
                     # save visualization results
                     v_pred_imgs = pred_imgs[b]
                     v_pred_depths = pred_depths[b].clamp(0.0, 140.0)
@@ -210,13 +207,15 @@ def main(args):
         torch.cuda.empty_cache()
 
         total_psnr = accelerator.gather_for_metrics(total_psnr).mean()
+        total_ws_psnr = accelerator.gather_for_metrics(total_ws_psnr).mean()
         total_ssim = accelerator.gather_for_metrics(total_ssim).mean()
         total_lpips = accelerator.gather_for_metrics(total_lpips).mean()
         total_pcc = accelerator.gather_for_metrics(total_pcc).mean()
         time_e = time.time()
-        logger.info("Finish evluation ({:d} s). Total psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}, pcc: {:.4f}.".format(
+        logger.info("Finish evluation ({:d} s). Total psnr: {:.3f}, ws_psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}, pcc: {:.4f}.".format(
             int(time_e - time_s),
             total_psnr.item() / len(val_dataloader),
+            total_ws_psnr.item() / len(val_dataloader),
             total_ssim.item() / len(val_dataloader),
             total_lpips.item() / len(val_dataloader),
             total_pcc.item() / len(val_dataloader)))

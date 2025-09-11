@@ -61,11 +61,24 @@
             "args": [
                 // "--config-file", "accelerate_config.yaml",
                 "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_all.py",
-                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_random_reg",
+                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_random",
                 // "--resume-from", "path/to/checkpoints"
             ],
             "console": "integratedTerminal",
-        },  
+        },
+        {
+            "name": "Debug OmniScene Train MP3D_Panorama_Cylinder_Double_All_512",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": [
+                // "--config-file", "accelerate_config.yaml",
+                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_all_512.py",
+                "--work-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_512",
+                // "--resume-from", "path/to/checkpoints"
+            ],
+            "console": "integratedTerminal",
+        },            
         {
             "name": "Debug OmniScene Train 360Loc_Panorama_Double_All",
             "type": "debugpy",
@@ -123,9 +136,9 @@
             "program": "${file}",
             "args": [
                 // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_all.py",
-                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_z3",
-                "--load-from", "checkpoint-36000"
+                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_all.py",
+                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_new",
+                "--load-from", "checkpoint-39000"
             ],
             "console": "integratedTerminal",
         },

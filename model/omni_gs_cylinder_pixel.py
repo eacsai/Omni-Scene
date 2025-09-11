@@ -164,12 +164,13 @@ class OmniGaussianCylinderPixel(BaseModule):
         return data_dict
     
     def configure_optimizers(self, lr):
-        backbone_layers = torch.nn.ModuleList([self.backbone])
-        backbone_layers_params = list(map(id, backbone_layers.parameters()))
-        base_params = list(filter(lambda p: id(p) not in backbone_layers_params, self.parameters()))
+        # 直接将所有需要训练的参数作为一个整体传递
+        # 过滤掉 requires_grad=False 的参数是一个好习惯
+        all_trainable_params = [p for p in self.parameters() if p.requires_grad]
         
         opt = torch.optim.AdamW(
-            [{'params': base_params}, {'params': backbone_layers.parameters(), 'lr': lr*0.1}],
+            # 不再是复杂的列表，直接传入所有参数
+            all_trainable_params,
             lr=lr, betas=(0.9, 0.999), weight_decay=0.01, eps=1e-8)
         return [opt]
     
@@ -190,14 +191,13 @@ class OmniGaussianCylinderPixel(BaseModule):
                                         )
 
         # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats, "b v c h w -> (b v) c h w"),
+        gaussians = self.pixel_gs(
+                img, img_feats,
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                 data_dict["rays_o"], data_dict["rays_d"])
 
-        gaussians_all = gaussians_pixel
+        gaussians_all = gaussians['gaussians']
 
-        bs = gaussians_pixel.shape[0]
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]
         render_fovys = data_dict["output_fovys"]
@@ -320,30 +320,31 @@ class OmniGaussianCylinderPixel(BaseModule):
         data_dict = self.get_data(batch)
         img = data_dict["imgs"]
         bs = img.shape[0]
-        img_feats = self.extract_img_feat(img=img,
-                                          depths_in=data_dict["depths"], 
-                                          confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"],
-                                          viewmats=data_dict["c2ws"]
-                                        )
-
-        # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats, "b v c h w -> (b v) c h w"),
-                data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"], status='test')
-
-        # vis feature points
-        # points_xyz = gaussians_pixel[..., :3][0].detach().cpu().numpy()
-        # points_rgb = point_features_to_rgb_colormap(gaussians_feat, cmap_name='rainbow')[0]
-        # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
-
-        gaussians_all = gaussians_pixel
         render_c2w = data_dict["output_c2ws"]
         render_fovxs = data_dict["output_fovxs"]
         render_fovys = data_dict["output_fovys"]
-        
+
         with self.benchmarker.time("render", num_calls=render_c2w.shape[1]):
+            img_feats = self.extract_img_feat(img=img,
+                                    depths_in=data_dict["depths"], 
+                                    confs_in=data_dict["confs"], 
+                                    pluckers=data_dict["pluckers"],
+                                    viewmats=data_dict["c2ws"],
+                                    status='test'
+                                )
+
+            # pixel-gs prediction
+            gaussians = self.pixel_gs(
+                    img, img_feats,
+                    data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
+                    data_dict["rays_o"], data_dict["rays_d"], status='test')
+
+            gaussians_all = gaussians['gaussians']
+            # vis feature points
+            # points_xyz = gaussians_pixel[..., :3][0].detach().cpu().numpy()
+            # points_rgb = point_features_to_rgb_colormap(gaussians_feat, cmap_name='rainbow')[0]
+            # save_point_cloud(points_xyz, points_rgb, filename="point_cloud.ply")
+
             render_pkg_fuse = self.renderer.render(
                 gaussians=gaussians_all,
                 c2w=render_c2w,
