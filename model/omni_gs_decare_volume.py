@@ -231,7 +231,7 @@ class OmniGaussianDecareVolume(BaseModule):
         # test_img = to_pil_image(img[0,0].clip(min=0, max=1))    
         # test_img.save('input_img.png')
 
-        bs, v, _, _, _ = img.shape
+        bs, v, _, h, w = img.shape
 
         # pixel-gs prediction
         with torch.no_grad():
@@ -242,10 +242,13 @@ class OmniGaussianDecareVolume(BaseModule):
                                             viewmats=data_dict["c2ws"]
                                             )
             # pixel-gs prediction
-            gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                    rearrange(img_feats, "b v c h w -> (b v) c h w"),
+            gaussians = self.pixel_gs(
+                    img, img_feats,
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                     data_dict["rays_o"], data_dict["rays_d"])
+            
+            gaussians_pixel = gaussians["gaussians"]
+            gaussians_feat = gaussians["features"]
 
             # volume-pixel-gs prediction
             tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
@@ -277,7 +280,7 @@ class OmniGaussianDecareVolume(BaseModule):
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         
         gaussians_volume = self.volume_gs(
-            [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+            [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
             gaussians_pixel_mask,
             gaussians_feat_mask,
             repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),
@@ -344,14 +347,16 @@ class OmniGaussianDecareVolume(BaseModule):
         conf_m_gt = data_dict["output_confs_m"]
         data_dict["depth_m_gt"] = depth_m_gt
         data_dict["conf_m_gt"] = conf_m_gt
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
+        output_positions = data_dict["output_positions"].view(bs, -1, 3)  # [B,v,h,w,xyz] -> [b,np,xyz]
+        positions_expanded = output_positions.unsqueeze(1).expand(-1, v, -1, -1)
+        positions_batched = positions_expanded.reshape(bs * v, -1, 3)
 
-        output_positions = data_dict["output_positions"]
-        mask_dptm = (output_positions[..., 0] >= x_start) & (output_positions[..., 0] <= x_end) & \
-                    (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
-                    (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
-        mask_dptm = mask_dptm.float()
+        transformed_positions = transform_points(positions_batched, rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
+
+        mask_inside = (transformed_positions [..., 0] >= x_start) & (transformed_positions [..., 0] <= x_end) & \
+                    (transformed_positions [..., 1] >= y_start) & (transformed_positions [..., 1] <= y_end) & \
+                    (transformed_positions [..., 2] >= z_start) & (transformed_positions [..., 2] <= z_end)
+        mask_dptm = mask_inside.view(bs, v, render_c2w.shape[1], h, w).any(dim=1).float()
         # mask_dptm = self.E2C(mask_dptm).squeeze(2)
         data_dict["mask_dptm"] = mask_dptm
 
@@ -473,19 +478,23 @@ class OmniGaussianDecareVolume(BaseModule):
     def forward_test(self, batch):
         data_dict = self.get_data(batch)
         img = data_dict["imgs"]
-        bs, v, _, _, _ = img.shape
-        img_feats = self.extract_img_feat(img=img,
-                                          depths_in=data_dict["depths"], 
-                                          confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"],
-                                          viewmats=data_dict["c2ws"],
-                                          status="test"
-                                        )
-        # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats, "b v c h w -> (b v) c h w"),
-                data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"], status='test')
+        bs, v, _, h, w = img.shape
+        with self.benchmarker.time("pixel_gs"):
+            img_feats = self.extract_img_feat(img=img,
+                                            depths_in=data_dict["depths"], 
+                                            confs_in=data_dict["confs"], 
+                                            pluckers=data_dict["pluckers"],
+                                            viewmats=data_dict["c2ws"],
+                                            status='test'
+                                            )
+            # pixel-gs prediction
+            gaussians = self.pixel_gs(
+                    img, img_feats,
+                    data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
+                    data_dict["rays_o"], data_dict["rays_d"], status='test')
+        
+        gaussians_pixel = gaussians["gaussians"]
+        gaussians_feat = gaussians["features"]
         
         # volume-pixel-gs prediction
         tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
@@ -517,7 +526,7 @@ class OmniGaussianDecareVolume(BaseModule):
         
         with self.benchmarker.time("volume_gs"):
             gaussians_volume = self.volume_gs(
-                [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+                [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
                 gaussians_pixel_mask,
                 gaussians_feat_mask,
                 repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),
@@ -554,11 +563,18 @@ class OmniGaussianDecareVolume(BaseModule):
                 rays_d=None
             )
 
-        output_positions = data_dict["output_positions"]
-        mask_dptm = (output_positions[..., 0] >= x_start) & (output_positions[..., 0] <= x_end) & \
-                    (output_positions[..., 1] >= y_start) & (output_positions[..., 1] <= y_end) & \
-                    (output_positions[..., 2] >= z_start) & (output_positions[..., 2] <= z_end)
-        mask_dptm = mask_dptm.float()
+        output_positions = data_dict["output_positions"].view(bs, -1, 3)  # [B,v,h,w,xyz] -> [b,np,xyz]
+        positions_expanded = output_positions.unsqueeze(1).expand(-1, v, -1, -1)
+        positions_batched = positions_expanded.reshape(bs * v, -1, 3)
+
+        transformed_positions = transform_points(positions_batched, rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
+
+        mask_inside = (transformed_positions[..., 0] >= x_start) & (transformed_positions[..., 0] <= x_end) & \
+                    (transformed_positions[..., 1] >= y_start) & (transformed_positions[..., 1] <= y_end) & \
+                    (transformed_positions[..., 2] >= z_start) & (transformed_positions[..., 2] <= z_end)
+        
+        mask_dptm = mask_inside.view(bs, v, render_c2w.shape[1], h, w).any(dim=1).float()
+        data_dict["mask_dptm"] = mask_dptm
 
         output_imgs = render_pkg_fuse["image"] * mask_dptm.unsqueeze(2) # b v 3 h w
         output_depths = render_pkg_fuse["depth"].squeeze(2) # b v h w

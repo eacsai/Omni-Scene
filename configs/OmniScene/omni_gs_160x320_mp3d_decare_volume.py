@@ -21,7 +21,7 @@ max_train_steps = 5000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_random2/checkpoint-36000/model.safetensors'
+resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel1/checkpoint-36000/model.safetensors'
 report_to = "tensorboard"
 
 volume_only = False
@@ -31,7 +31,7 @@ use_center, use_first, use_last = True, False, False
 resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
-point_cloud_range = [-10.0, -5.0, -10.0, 10.0, 5.0, 10.0]
+point_cloud_range = [-10.0, -7.0, -10.0, 10.0, 3.0, 10.0]
 
 dataset_params = dict(
     dataset_name="nuScenesDataset",

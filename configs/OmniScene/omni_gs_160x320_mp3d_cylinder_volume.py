@@ -5,10 +5,10 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume"
+exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume1"
 output_dir = "/data/qiwei/nips25/workdirs"
 
-lr = 1e-4 #1e-4
+lr = 2e-4 #1e-4
 grad_max_norm = 1.0
 print_freq = 100
 save_freq = 3000
@@ -19,12 +19,12 @@ save_epoch_freq = -1
 lr_scheduler_type = "constant_with_warmup"
 max_train_steps = 5000
 volume_train_steps = 18000
-warmup_steps = 500
+warmup_steps = 1000
 mixed_precision = "no"
 gradient_accumulation_steps = 1
 # resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_cam/checkpoint-36000/model.safetensors'
 # resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume/checkpoint-36000/model.safetensors'
-resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_random2/checkpoint-36000/model.safetensors'
+resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel1/checkpoint-36000/model.safetensors'
 # resume_from = False
 report_to = "tensorboard"
 
@@ -36,7 +36,7 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-point_cloud_range = [0.0, 0.0, -5.0, 10.0, 6.28, 5.0] # r, phi, z
+point_cloud_range = [0.0, 0.0, -7.0, 10.0, 6.28, 3.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1
@@ -183,14 +183,19 @@ model = dict(
     volume_only=volume_only,
     backbone=dict(
         type='BackboneResnet',
-        d_in=3,),
+        feature_channels=[128, 96, 64, 32],
+        num_transformer_layers=6,
+        ffn_dim_expansion=4,
+        no_cross_attn=False,
+        num_head=1,
+    ),
     pixel_gs=dict(
         type="PixelGaussian",
         use_checkpoint=use_checkpoint,
-        in_embed_dim=_dim_,
-        out_embed_dims=[_dim_, _dim_*2, _dim_*4, _dim_*4],
-        near=near,
-        far=far
+        image_height=resolution[0],
+        patchs_height=1,
+        patchs_width=1,
+        gh_cnn_layers=3,
     ),
     volume_gs=dict(
         type="VolumeGaussianCylinder",

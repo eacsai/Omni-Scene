@@ -175,8 +175,8 @@
             "program": "${file}",
             "args": [
                 // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_double_volume.py",
-                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume",
+                "--py-config", "configs/OmniScene/omni_gs_160x320_mp3d_cylinder_volume.py",
+                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_volume_random",
                 "--load-from", "checkpoint-3000"
             ],
             "console": "integratedTerminal",

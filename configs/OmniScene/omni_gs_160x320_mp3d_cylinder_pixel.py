@@ -19,7 +19,7 @@ save_epoch_freq = -1
 lr_scheduler_type = "constant_with_warmup"
 max_train_steps = 5000
 volume_train_steps = 18000
-warmup_steps = 500
+warmup_steps = 1000
 mixed_precision = "no"
 gradient_accumulation_steps = 1
 # resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_cam/checkpoint-36000/model.safetensors'
@@ -34,7 +34,7 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0] # r, phi, z
+point_cloud_range = [0.0, 0.0, -7.0, 10.0, 6.28, 3.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1

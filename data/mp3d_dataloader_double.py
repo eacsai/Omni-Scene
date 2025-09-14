@@ -204,19 +204,6 @@ class DatasetMP3D(Dataset):
         c2w = repeat(torch.eye(4, dtype=torch.float32), "h w -> b h w", b=b).clone()
         c2w[:, :3, :3] = rots
         c2w[:, :3, 3] = -trans
-        # w2w = torch.tensor([  # X -> X, -Z -> Y, upY -> Z
-        #     [1, 0, 0, 0],
-        #     [0, 0, -1, 0],
-        #     [0, 1, 0, 0],
-        #     [0, 0, 0, 1],
-        # ]).float()
-        # c2c = torch.tensor([  # rightx -> rightx, upy -> -downy, backz -> -forwardz
-        #     [1, 0, 0, 0],
-        #     [0, -1, 0, 0],
-        #     [0, 0, -1, 0],
-        #     [0, 0, 0, 1],
-        # ]).float()
-        # c2w = w2w @ c2w @ c2c
         return c2w
 
     def convert_images(

@@ -40,7 +40,7 @@ class PixelGaussian(BaseModule):
         # )
 
         self.opt_act = torch.sigmoid
-        self.scale_act = lambda x: torch.exp(x) * 0.01
+        self.scale_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = torch.sigmoid
         
@@ -72,7 +72,7 @@ class PixelGaussian(BaseModule):
 
             # Gaussians prediction: covariance, color
             gau_in = 3 + 1 + 1 + feature_channels  ## rgb+depth+conf+feature
-            gau_hid = self.gau_out * 4
+            gau_hid = 128
             if stage_idx > 0:
                 gau_in += gau_hid
             self.to_gaussians_list.append(self.gaussians_cnn(
@@ -212,8 +212,10 @@ class PixelGaussian(BaseModule):
 
             # cams_embeds = self.cams_embeds_list[stage_idx][None, :v, :, None, None].repeat(bs, 1, 1, images.shape[2], images.shape[3])
             # cams_embeds = rearrange(cams_embeds, "b v c h w -> (b v) c h w", v=v)
+            
+            # features = features + cams_embeds + plucker_embeds
 
-            raw_gaussians_in = torch.cat((images, confs, depths, features), dim=1)
+            raw_gaussians_in = torch.cat((images, confs, depths / 20.0, features), dim=1)
 
             # fibonnaci sphere grid
             xy = getattr(self, f"gs_xy_{stage_idx}_{patch_idx}")
@@ -254,11 +256,9 @@ class PixelGaussian(BaseModule):
 
             raw_gaussians = F.grid_sample(raw_gaussians, patch_grid, padding_mode="border")
             raw_gaussians = rearrange(raw_gaussians, "(b v) c n 1 -> b v n c", v=v, b=bs)
-            features = F.grid_sample(features, patch_grid, padding_mode="border")
-            features = rearrange(features, "(b v) c n 1 -> b v n c", v=v, b=bs)
 
-            raw_gaussians = self.gaussians_mlp_list[stage_idx](raw_gaussians)
-            gaussians = rearrange(raw_gaussians, "b v n c -> b (v n) c",
+            raw_gaussians_final = self.gaussians_mlp_list[stage_idx](raw_gaussians)
+            gaussians = rearrange(raw_gaussians_final, "b v n c -> b (v n) c",
                                 b=bs, v=v, c=self.gau_out)
             
             offsets = gaussians[..., :1]
@@ -278,14 +278,14 @@ class PixelGaussian(BaseModule):
             # means = means + offsets
 
             gaussians_final = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
-            features_final = rearrange(features, "b v n c -> b (v n) c", b=bs, v=v).contiguous()
             gaussians_stage = {
                 "gaussians": gaussians_final,
-                "features": features_final,
+                "features": rearrange(raw_gaussians, "b v n c -> b (v n) c", b=bs, v=v).contiguous(),
             }
             gaussians_all["stages"].append(gaussians_stage)
         
         # gaussians_all.update(gaussians_stage)
         gaussians_all['gaussians'] = torch.cat([g["gaussians"] for g in gaussians_all["stages"]], dim=1)
+        gaussians_all['features'] = torch.cat([g["features"] for g in gaussians_all["stages"]], dim=1)
         
         return gaussians_all

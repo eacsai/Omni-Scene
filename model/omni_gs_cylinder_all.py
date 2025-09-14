@@ -78,9 +78,6 @@ class OmniGaussianCylinderAll(BaseModule):
         # record runtime
         self.benchmarker = Benchmarker()
 
-        self.E2C = Equirec2Cube(equ_h=160, equ_w=320, cube_length=self.camera_args['resolution'][0])
-        self.C2E = Cube2Equirec(cube_length=40, equ_h=80)
-
     def extract_img_feat(self, img, depths_in, confs_in, pluckers, viewmats, status="train"):
         """Extract features of images."""
         # B, N, C, H, W = img.size()
@@ -217,18 +214,20 @@ class OmniGaussianCylinderAll(BaseModule):
 
         bs, v, _, h, w = img.shape
         img_feats = self.extract_img_feat(img=img,
-                                          depths_in=data_dict["depths"], 
-                                          confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"],
-                                          viewmats=data_dict["c2ws"]
+                                            depths_in=data_dict["depths"], 
+                                            confs_in=data_dict["confs"], 
+                                            pluckers=data_dict["pluckers"],
+                                            viewmats=data_dict["c2ws"]
                                         )
 
         # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats, "b v c h w -> (b v) c h w"),
+        gaussians = self.pixel_gs(
+                img, img_feats,
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"]
-        )
+                data_dict["rays_o"], data_dict["rays_d"])
+        
+        gaussians_pixel = gaussians["gaussians"]
+        gaussians_feat = gaussians["features"]
 
         # volume-pixel-gs prediction
         tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
@@ -259,7 +258,7 @@ class OmniGaussianCylinderAll(BaseModule):
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         
         gaussians_volume = self.volume_gs(
-            [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+            [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
             gaussians_pixel_mask,
             gaussians_feat_mask,
             repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),
@@ -481,21 +480,22 @@ class OmniGaussianCylinderAll(BaseModule):
         data_dict = self.get_data(batch)
         img = data_dict["imgs"]
         bs, v, _, h, w = img.shape
-        img_feats = self.extract_img_feat(img=img,
-                                          depths_in=data_dict["depths"], 
-                                          confs_in=data_dict["confs"], 
-                                          pluckers=data_dict["pluckers"],
-                                          viewmats=data_dict["c2ws"],
-                                          status="test"
-                                        )
-
-        # pixel-gs prediction
         with self.benchmarker.time("pixel_gs"):
-            gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                    rearrange(img_feats, "b v c h w -> (b v) c h w"),
+            img_feats = self.extract_img_feat(img=img,
+                                            depths_in=data_dict["depths"], 
+                                            confs_in=data_dict["confs"], 
+                                            pluckers=data_dict["pluckers"],
+                                            viewmats=data_dict["c2ws"],
+                                            status='test'
+                                            )
+            # pixel-gs prediction
+            gaussians = self.pixel_gs(
+                    img, img_feats,
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                     data_dict["rays_o"], data_dict["rays_d"], status='test')
-
+        
+        gaussians_pixel = gaussians["gaussians"]
+        gaussians_feat = gaussians["features"]
         tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
         tmp_gaussians_pixel = rearrange(tmp_gaussians_pixel, 'b v n c -> (b v) n c').contiguous()
         tmp_gaussians_feat = repeat(gaussians_feat[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
@@ -522,7 +522,7 @@ class OmniGaussianCylinderAll(BaseModule):
         
         with self.benchmarker.time("volume_gs"):
             gaussians_volume = self.volume_gs(
-                [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+                [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
                 gaussians_pixel_mask,
                 gaussians_feat_mask,
                 repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),

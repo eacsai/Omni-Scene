@@ -1,7 +1,7 @@
 
 import os, time, argparse, os.path as osp, numpy as np
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -208,12 +208,17 @@ def main(args):
         path = None
 
     if path:
-        full_path = os.path.join(args.output_dir, path)
+        full_path = os.path.join(args.output_dir, path, 'model.safetensors')
         accelerator.print(f"Resuming from checkpoint {full_path}")
-        accelerator.load_state(full_path, map_location='cpu', strict=False)
+        state_dict = load_file(full_path, device="cpu")
+        model_dict = my_model.state_dict()
+
         global_iter = int(path.split("-")[1])
 
-        print(f'Successfully loaded from iter{global_iter}')
+        filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+        model_dict.update(filtered_dict)
+        my_model.load_state_dict(model_dict)
+        accelerator.print("Model weights loaded successfully before prepare().")
 
     else:
         print('Can\'t find checkpoint {}. Randomly initialize model parameters anyway.'.format(args.load_from))
@@ -244,7 +249,7 @@ def main(args):
     time_s = time.time()
     with torch.no_grad():
         my_model.eval()
-        total_psnr, total_ssim, total_lpips, total_pcc, total_pcc_m = 0.0, 0.0, 0.0, 0.0, 0.0
+        total_psnr, total_wspsnr, total_ssim, total_lpips, total_pcc, total_pcc_m = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         total_absrel, total_rmse, total_absrel_ref, total_rmse_ref = 0.0, 0.0, 0.0, 0.0
         for i_iter, batch in enumerate(val_dataloader):
             data_time_e = time.time()
@@ -259,16 +264,18 @@ def main(args):
             gt_depths_m = gts["depth_m"]
             # compute metrics and save results
             # pnsr
-            # bv_psnr = compute_psnr(
-            #     rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
-            #     rearrange(pred_imgs, "b v c h w -> (b v) c h w")).view(bs, -1)
-            bv_psnr = wspsnr_calculator.ws_psnr(
+            bv_psnr = compute_psnr(
+                rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
+                rearrange(pred_imgs, "b v c h w -> (b v) c h w")).view(bs, -1)
+            bv_psnr_mean = bv_psnr.mean()
+            total_psnr += bv_psnr_mean            
+            # wspsnr
+            bv_wspsnr = wspsnr_calculator.ws_psnr(
                 rearrange(gt_imgs, "b v c h w -> (b v) h w c"),
                 rearrange(pred_imgs, "b v c h w -> (b v) h w c"),
-                max_val=1.0
-            ).view(bs, -1)
-            bv_psnr_mean = bv_psnr.mean()
-            total_psnr += bv_psnr_mean
+                max_val=1.0).view(bs, -1)
+            bv_wspsnr_mean = bv_wspsnr.mean()
+            total_wspsnr += bv_wspsnr_mean
             # ssim
             bv_ssim = compute_ssim(
                 rearrange(gt_imgs, "b v c h w -> (b v) c h w"),
@@ -292,8 +299,8 @@ def main(args):
             #     rearrange(gt_depths_m, "b v c h w -> (b v c) h w")).view(bs, -1)
             # bv_pcc_m_mean = bv_pcc_m.mean()
             # total_pcc_m += bv_pcc_m_mean
-            logger.info('[Eval] Batch %d-%d: psnr: %.3f, ssim: %.4f, lpips: %.4f, pcc: %.4f'%(
-                    i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
+            logger.info('[Eval] Batch %d-%d: psnr: %.3f, wspsnr: %.3f, ssim: %.4f, lpips: %.4f, pcc: %.4f'%(
+                    i_iter, bv_psnr_mean.device.index, bv_psnr_mean, bv_wspsnr_mean, bv_ssim_mean, bv_lpips_mean, bv_pcc_mean))
             output_dir = os.path.join(cfg.output_dir, str(global_iter))
             os.makedirs(output_dir, exist_ok=True)
             if cfg.eval_args.save_ply:
@@ -308,6 +315,9 @@ def main(args):
                     # get psnr for this batch sample
                     v_psnr = bv_psnr[b]
                     v_psnr_mean = v_psnr.mean()
+                    # get wspsnr for this batch sample
+                    v_wspsnr = bv_wspsnr[b]
+                    v_wspsnr_mean = v_wspsnr.mean()
                     v_psnr_str = "%.2f" % v_psnr_mean.item()
                     # get ssim for this batch sample
                     v_ssim = bv_ssim[b]
@@ -322,6 +332,7 @@ def main(args):
                     scene_name = batch['scene'][b]
                     scene_res[scene_name].append({
                         "psnr": v_psnr_mean,
+                        'wspsnr': v_wspsnr_mean,
                         "ssim": v_ssim_mean,
                         "lpips": v_lpips_mean,
                         'pcc': v_pcc_mean,
@@ -344,21 +355,25 @@ def main(args):
         for s in scene_res:
             res = scene_res[s]
             s_psnr = 0
+            s_wspsnr = 0
             s_ssim = 0
             s_lpips = 0
             s_pcc = 0
             for m in res:
                 s_psnr = s_psnr + m['psnr'].item()
+                s_wspsnr = s_wspsnr + m['wspsnr'].item()
                 s_ssim = s_ssim + m['ssim'].item()
                 s_lpips = s_lpips + m['lpips'].item()
                 s_pcc = s_pcc + m['pcc'].item()
             s_psnr = s_psnr / len(res)
+            s_wspsnr = s_wspsnr / len(res)
             s_ssim = s_ssim / len(res)
             s_lpips = s_lpips / len(res)
             s_pcc = s_pcc / len(res)
-            logger.info(" {} psnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}, pcc: {:.4f}".format(
+            logger.info(" {} psnr: {:.3f}, wspsnr: {:.3f}, ssim: {:.4f}, lpips: {:.4f}, pcc: {:.4f}".format(
             s,
             s_psnr,
+            s_wspsnr,
             s_ssim,
             s_lpips,
             s_pcc,
