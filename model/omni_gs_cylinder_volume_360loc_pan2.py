@@ -220,11 +220,13 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
                                         )
 
         # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats, "b v c h w -> (b v) c h w"),
+        gaussians = self.pixel_gs(
+                img, img_feats,
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"]
-        )
+                data_dict["rays_o"], data_dict["rays_d"])
+        
+        gaussians_pixel = gaussians["gaussians"]
+        gaussians_feat = gaussians["features"]
 
         # volume-pixel-gs prediction
         tmp_gaussians_pixel = rearrange(gaussians_pixel, "b v hw c -> b (v hw) c").unsqueeze(1).repeat(1,v,1,1).contiguous()
@@ -252,7 +254,7 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
         gaussians_feat_mask = [volume_gaussians_feat[b][mask_pixel[b]] for b in range(volume_gaussians_feat.shape[0])]
 
         gaussians_volume = self.volume_gs(
-            [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+            [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
             gaussians_pixel_mask,
             gaussians_feat_mask,
             repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),
@@ -478,11 +480,13 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
 
         # pixel-gs prediction
         with self.benchmarker.time("pixel_gs"):
-            gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                    rearrange(img_feats, "b v c h w -> (b v) c h w"),
+            gaussians = self.pixel_gs(
+                    img, img_feats,
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                    data_dict["rays_o"], data_dict["rays_d"], status='test'
-            )
+                    data_dict["rays_o"], data_dict["rays_d"])
+            
+            gaussians_pixel = gaussians["gaussians"]
+            gaussians_feat = gaussians["features"]
 
         # vis feature points
         # points_xyz = gaussians_pixel[..., :3][0].detach().cpu().numpy()
@@ -512,12 +516,12 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
 
         with self.benchmarker.time("volume_gs"):
             gaussians_volume = self.volume_gs(
-                [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+                [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
                 gaussians_pixel_mask,
                 gaussians_feat_mask,
                 repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),
                 repeat(data_dict["depths"], "b vo c h w -> (b v) vo c h w", v=v),
-                data_dict["img_metas"], status='test'
+                data_dict["img_metas"]
             )
 
             new_gaussian_points = transform_points(gaussians_volume[..., :3], rearrange(data_dict["c2ws"], "b v h w -> (b v) h w"))

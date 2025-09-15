@@ -1,4 +1,6 @@
 import os, time, argparse, os.path as osp, numpy as np
+# os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -180,8 +182,8 @@ def main(args):
             data_time_e = time.time()
             with accelerator.accumulate(my_model):
                 optimizer.zero_grad()
+                # loss, log, _, _, _, _, _, _, _ = my_model.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
                 loss, log, _, _, _, _, _, _, _ = my_model.module.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
-                # loss, log, _, _, _, _, _, _, _ = my_model.module.forward(batch, "train", iter=global_iter, iter_end=cfg.max_train_steps)
 
                 accelerator.backward(loss)
 
@@ -208,8 +210,8 @@ def main(args):
                         for i_iter_val, batch_val in enumerate(val_dataloader):
                             val_batch_save_dir = osp.join(cfg.output_dir, cfg.exp_name, "validation",
                                                 "step-{}/batch-{}".format(global_iter, i_iter_val))
+                            # log_val = my_model.validation_step(batch_val, val_batch_save_dir)
                             log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
-                            # log_val = my_model.module.validation_step(batch_val, val_batch_save_dir)
                             log.update(log_val)
                     my_model.train()
             

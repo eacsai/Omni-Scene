@@ -18,7 +18,7 @@ from torch.nn.init import normal_
 from .geometry import sample_image_grid, fibonacci_sphere_grid, pad_pano, unpad_pano
 
 @MODELS.register_module()
-class PixelGaussian360Loc(BaseModule):
+class PixelGaussian512(BaseModule):
 
     def __init__(self,
                  image_height=160,
@@ -40,11 +40,14 @@ class PixelGaussian360Loc(BaseModule):
         # )
 
         self.opt_act = torch.sigmoid
+        # self.scale_act = lambda x: F.softplus(x) * 0.01
         self.scale_act = lambda x: torch.sigmoid(x)
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = torch.sigmoid
-        
-        
+
+        self.scale_min = 0.5
+        self.scale_max = 15.0
+
         self.to_gaussians_list = nn.ModuleList()
         self.gaussians_mlp_list = nn.ModuleList()
         self.plucker_to_embed_list = nn.ModuleList()
@@ -195,6 +198,7 @@ class PixelGaussian360Loc(BaseModule):
         gaussians_all["stages"] = []
         self.clean_padded_cache()
         for stage_idx, stage in enumerate(img_feats['trans_features']):
+            _, _, _, h, w = stage.shape
             features = rearrange(stage, "b v ... -> (b v) ...")
             
             # feature refine
@@ -258,7 +262,8 @@ class PixelGaussian360Loc(BaseModule):
             raw_gaussians = rearrange(raw_gaussians, "(b v) c n 1 -> b v n c", v=v, b=bs)
 
             raw_gaussians_final = self.gaussians_mlp_list[stage_idx](raw_gaussians)
-            gaussians = raw_gaussians_final # b v n c
+            gaussians = rearrange(raw_gaussians_final, "b v n c -> b (v n) c",
+                                b=bs, v=v, c=self.gau_out)
             
             offsets = gaussians[..., :1]
             opacities = self.opt_act(gaussians[..., 1:2])
@@ -266,22 +271,39 @@ class PixelGaussian360Loc(BaseModule):
             rotations = self.rot_act(gaussians[..., 5:9])
             rgbs = self.rgb_act(gaussians[..., 9:12])
 
+            depths_in_curr = rearrange(depths_in_curr, "b v n c-> b (v n) c", b=bs, v=v)
+            origins_curr = rearrange(origins_curr, "b v n c -> b (v n) c")
             origins_curr = origins_curr.unsqueeze(-2)
+            directions_curr = rearrange(directions_curr, "b v n c -> b (v n) c")
             directions_curr = directions_curr.unsqueeze(-2)
             depth_pred = (depths_in_curr + offsets).clamp(min=0.0)
             means = origins_curr + directions_curr * depth_pred[..., None]
-            means = rearrange(means, "b v r n c -> b v (r n) c")
+            means = rearrange(means, "b r n c -> b (r n) c")
             # means = means + offsets
 
-            gaussians_final = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
+            # new scale
+            scales_new = self.scale_min + (self.scale_max - self.scale_min) * scales
+            pixel_size = 1 / torch.tensor((w, h), dtype=scales_new.dtype, device=scales_new.device)
+            multiplier = self.get_scale_multiplier(pixel_size)
+            scales_new = scales_new * depth_pred * multiplier[..., None]
+
+            gaussians_final = torch.cat([means, rgbs, opacities, rotations, scales_new], dim=-1)
             gaussians_stage = {
                 "gaussians": gaussians_final,
-                "features": raw_gaussians,
+                "features": rearrange(raw_gaussians, "b v n c -> b (v n) c", b=bs, v=v).contiguous(),
             }
             gaussians_all["stages"].append(gaussians_stage)
         
         # gaussians_all.update(gaussians_stage)
-        gaussians_all['gaussians'] = torch.cat([g["gaussians"] for g in gaussians_all["stages"]], dim=2)
-        gaussians_all['features'] = torch.cat([g["features"] for g in gaussians_all["stages"]], dim=2)
+        gaussians_all['gaussians'] = torch.cat([g["gaussians"] for g in gaussians_all["stages"]], dim=1)
+        gaussians_all['features'] = torch.cat([g["features"] for g in gaussians_all["stages"]], dim=1)
         
         return gaussians_all
+
+    def get_scale_multiplier(
+        self,
+        pixel_size: Float[Tensor, "*#batch 2"],
+        multiplier: float = 0.1,
+    ) -> Float[Tensor, " *batch"]:
+        xy_multipliers = multiplier * pixel_size.new_tensor([2 * np.pi, np.pi]) * pixel_size
+        return xy_multipliers.sum(dim=-1)

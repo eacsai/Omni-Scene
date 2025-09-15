@@ -211,18 +211,20 @@ class Dataset360Loc(IterableDataset):
                 confs_m_path = []
                 if self.stage == "train":
                     for i in index:
-                        depths_path.append(str(images_path[i]).replace('image', 'depth_metric').replace('.jpg', '_depth.npy'))
+                        depths_path.append(str(images_path[i]).replace('image', 'depthanywhere').replace('.jpg', '_depth_anywhere.png'))
                         depths_m_path.append(str(images_path[i]).replace('image', 'depth_metric').replace('.jpg', '_depth.npy'))
                         confs_m_path.append(str(images_path[i]).replace('image', 'depth_metric').replace('.jpg', '_conf.npy'))
                 else:
-                    depths_path = [example_path / 'depth_metric' / frames[i].replace('.jpg', '_depth.npy') for i in index]
+                    depths_path = [example_path / 'depthanywhere' / frames[i].replace('.jpg', '_depth_anywhere.png') for i in index]
                     depths_m_path = [example_path / 'depth_metric' / frames[i].replace('.jpg', '_depth.npy') for i in index]
                     confs_m_path = [example_path / 'depth_metric' / frames[i].replace('.jpg', '_conf.npy') for i in index]
 
                 target_index = len(context_indices)
 
-                context_depths = self.convert_depths(depths_path[:target_index])
-                target_depths = self.convert_depths(depths_path[target_index:])
+                context_depths = self.convert_images(depths_path[:target_index])
+                target_depths = self.convert_images(depths_path[target_index:])
+                context_depths = context_depths.clamp(min=0.)
+                target_depths = target_depths.clamp(min=0.)
                 # metric depth path
                 # depths_path = [str(scene_path / v / 'depth.png') for v in views]
                 context_m_depths = self.convert_depths(depths_m_path[:target_index])

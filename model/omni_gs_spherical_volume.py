@@ -240,10 +240,13 @@ class OmniGaussianSphericalVolume(BaseModule):
                                             viewmats=data_dict["c2ws"]
                                             )
             # pixel-gs prediction
-            gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                    rearrange(img_feats, "b v c h w -> (b v) c h w"),
+            gaussians = self.pixel_gs(
+                    img, img_feats,
                     data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
                     data_dict["rays_o"], data_dict["rays_d"])
+
+            gaussians_pixel = gaussians["gaussians"]
+            gaussians_feat = gaussians["features"]
 
             # volume-pixel-gs prediction
             tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
@@ -253,30 +256,27 @@ class OmniGaussianSphericalVolume(BaseModule):
             tmp_gaussians_points = transform_points(tmp_gaussians_pixel[..., :3], rearrange(torch.inverse(data_dict["c2ws"]), "b v h w -> (b v) h w"))
             volume_gaussians_pixel = torch.cat([tmp_gaussians_points, tmp_gaussians_pixel[..., 3:]], dim=-1)
         
-        # original
-        # volume_gaussians_pixel = gaussians_pixel
-        # volume_gaussians_feat = gaussians_feat
+            # original
+            # volume_gaussians_pixel = gaussians_pixel
+            # volume_gaussians_feat = gaussians_feat
 
-        # volume-gs prediction
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
-        gaussians_pixel_mask, gaussians_feat_mask = [], []
+            # volume-gs prediction
+            gaussians_pixel_mask, gaussians_feat_mask = [], []
+            spherical_r = torch.sqrt(volume_gaussians_pixel[..., 0]**2 + volume_gaussians_pixel[..., 1]**2 + volume_gaussians_pixel[..., 2]**2 + 1e-5)
+            # Spherical
+            for b in range(bs * v):
+                mask_pixel_i = (spherical_r[b] > self.point_cloud_range[2]) & (spherical_r[b] < self.point_cloud_range[5])
+                # fix tab
+                gaussians_pixel_mask_i = volume_gaussians_pixel[b][mask_pixel_i]
+                gaussians_feat_mask_i = volume_gaussians_feat[b][mask_pixel_i]
 
-        spherical_r = torch.sqrt(volume_gaussians_pixel[..., 0]**2 + volume_gaussians_pixel[..., 1]**2 + volume_gaussians_pixel[..., 2]**2 + 1e-5)
-        # Spherical
-        for b in range(bs * v):
-            mask_pixel_i = (spherical_r[b] > self.point_cloud_range[2]) & (spherical_r[b] < self.point_cloud_range[5])
-            # fix tab
-            gaussians_pixel_mask_i = volume_gaussians_pixel[b][mask_pixel_i]
-            gaussians_feat_mask_i = volume_gaussians_feat[b][mask_pixel_i]
-
-            gaussians_pixel_mask.append(gaussians_pixel_mask_i)
-            gaussians_feat_mask.append(gaussians_feat_mask_i)
+                gaussians_pixel_mask.append(gaussians_pixel_mask_i)
+                gaussians_feat_mask.append(gaussians_feat_mask_i)
 
         # single_features_to_RGB(img_feats[0].squeeze(1), img_name='input_feat.png')
         
         gaussians_volume = self.volume_gs(
-            [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+            [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
             gaussians_pixel_mask,
             gaussians_feat_mask,
             repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),
@@ -444,10 +444,13 @@ class OmniGaussianSphericalVolume(BaseModule):
                                           status="test"
                                         )
         # pixel-gs prediction
-        gaussians_pixel, gaussians_feat, depth_pred = self.pixel_gs(
-                rearrange(img_feats, "b v c h w -> (b v) c h w"),
+        gaussians = self.pixel_gs(
+                img, img_feats,
                 data_dict["depths"], data_dict["confs"], data_dict["pluckers"],
-                data_dict["rays_o"], data_dict["rays_d"], status='test')
+                data_dict["rays_o"], data_dict["rays_d"], status="test")
+        
+        gaussians_pixel = gaussians["gaussians"]
+        gaussians_feat = gaussians["features"]
         
         # volume-pixel-gs prediction
         tmp_gaussians_pixel = repeat(gaussians_pixel[:,None,:,:], 'b vo n c -> b (vo v) n c', v=v).contiguous()
@@ -462,10 +465,7 @@ class OmniGaussianSphericalVolume(BaseModule):
         # volume_gaussians_feat = gaussians_feat
 
         # volume-gs prediction
-        pc_range = self.dataset_params.pc_range
-        x_start, y_start, z_start, x_end, y_end, z_end = pc_range
         gaussians_pixel_mask, gaussians_feat_mask = [], []
-
         spherical_r = torch.sqrt(volume_gaussians_pixel[..., 0]**2 + volume_gaussians_pixel[..., 1]**2 + volume_gaussians_pixel[..., 2]**2 + 1e-5)
         # Spherical
         for b in range(bs*v):
@@ -479,7 +479,7 @@ class OmniGaussianSphericalVolume(BaseModule):
         
         with self.benchmarker.time("volume_gs"):
             gaussians_volume = self.volume_gs(
-                [repeat(img_feats, "b vo c h w -> (b v) vo c h w", v=v)],
+                [repeat(img_feats['trans_features'][0], "b vo c h w -> (b v) vo c h w", v=v)],
                 gaussians_pixel_mask,
                 gaussians_feat_mask,
                 repeat(data_dict["imgs"], "b vo c h w -> (b v) vo c h w", v=v),

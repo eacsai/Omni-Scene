@@ -22,7 +22,7 @@ volume_train_steps = 18000
 warmup_steps = 500
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all_new/checkpoint-39000/model.safetensors"
+resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_all1/checkpoint-36000/model.safetensors"
 # resume_from = "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume/checkpoint-18000/model.safetensors"
 # resume_from = False
 report_to = "tensorboard"
@@ -35,7 +35,7 @@ resolution = [160, 320]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
 
-point_cloud_range = [0.0, 0.0, -3.0, 16.0, 6.28, 3.0] # r, phi, z
+point_cloud_range = [0.0, 0.0, -7.0, 10.0, 6.28, 3.0] # r, phi, z
 scale_theta = 1
 scale_r = 1
 scale_z = 1
@@ -80,9 +80,9 @@ loss_args = dict(
     weight_recon=1.0,
     weight_perceptual=0.05,
     weight_depth_abs=0.1,
-    weight_recon_vol=0.0,
-    weight_perceptual_vol=0.0,
-    weight_depth_abs_vol=0.0,
+    weight_recon_vol=1.0,
+    weight_perceptual_vol=0.05,
+    weight_depth_abs_vol=0.1,
     weight_volume_loss=0.0 #0.1
 )
 
@@ -182,14 +182,19 @@ model = dict(
     volume_only=volume_only,
     backbone=dict(
         type='BackboneResnet',
-        d_in=3,),
+        feature_channels=[128, 96, 64, 32],
+        num_transformer_layers=6,
+        ffn_dim_expansion=4,
+        no_cross_attn=False,
+        num_head=1,
+    ),
     pixel_gs=dict(
         type="PixelGaussian360Loc",
         use_checkpoint=use_checkpoint,
-        in_embed_dim=_dim_,
-        out_embed_dims=[_dim_, _dim_*2, _dim_*4, _dim_*4],
-        near=near,
-        far=far
+        image_height=resolution[0],
+        patchs_height=1,
+        patchs_width=1,
+        gh_cnn_layers=3,
     ),
     volume_gs=dict(
         type="VolumeGaussianCylinder",

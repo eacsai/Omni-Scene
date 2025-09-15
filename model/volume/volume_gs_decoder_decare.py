@@ -324,7 +324,7 @@ class VolumeGaussianDecoderDecare(BaseModule):
         )
         rgbs = color.view(bs, w, h, z, self.gpv, 3) # bs, w, h, z, gpv, 3
         x = torch.cat([gs_positions, scale_3d, rgbs, gaussians[..., 9:]], dim=-1)
-        rgbs = self.rgb_act(x[..., 6:9])
+        # rgbs = self.rgb_act(x[..., 6:9])
         opacity = self.opacity_act(x[..., 9:10])
         rotation = self.rot_act(x[..., 10:14])
 

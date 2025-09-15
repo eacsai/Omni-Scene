@@ -25,6 +25,7 @@ import torchvision.transforms as transforms
 to_pil_image = transforms.ToPILImage()
 import matplotlib.cm as cm
 import cv2
+from collections import OrderedDict
 
 def onlyDepth(depth, save_name):
     cmap = cm.Spectral
@@ -56,6 +57,19 @@ class OmniGaussianCylinderPixel(BaseModule):
         self.use_checkpoint = use_checkpoint
         if backbone:
             self.backbone = MODELS.build(backbone)
+            ckpt_path = 'checkpoints/gmdepth-scale1-resumeflowthings-scannet-5d9d7964.pth'
+            unimatch_pretrained_model = torch.load(ckpt_path)["model"]
+            updated_state_dict = OrderedDict(
+                {
+                    k: v
+                    for k, v in unimatch_pretrained_model.items()
+                    if k in self.backbone.state_dict() and v.shape == self.backbone.state_dict()[k].shape
+                }
+            )
+            # NOTE: when wo cross attn, we added ffns into self-attn, but they have no pretrained weight
+            self.backbone.load_state_dict(updated_state_dict, strict=False)
+            print("==> Load multi-view transformer backbone checkpoint: %s" % ckpt_path)
+
         self.pixel_gs = MODELS.build(pixel_gs)
         self.volume_gs = MODELS.build(volume_gs)
         self.dataset_params = dataset_params

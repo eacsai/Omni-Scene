@@ -9,3 +9,4 @@ checkpoint-100000
 *.exr
 *.xml
 *.ply
+checkpoints/

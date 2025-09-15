@@ -5,33 +5,40 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_Spherical_decare"
+exp_name = "omni_gs_160x320_mp3d_cylinder_double_pixel_512"
 output_dir = "/data/qiwei/nips25/workdirs"
 
-lr = 1e-4
+lr = 2e-4 #1e-4
 grad_max_norm = 1.0
 print_freq = 100
 save_freq = 3000
 val_freq = 3000
-max_epochs = 10
+max_epochs = 25
 save_epoch_freq = -1
 
 lr_scheduler_type = "constant_with_warmup"
 max_train_steps = 5000
-warmup_steps = 500
+volume_train_steps = 18000
+warmup_steps = 1000
 mixed_precision = "no"
 gradient_accumulation_steps = 1
-resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel1/checkpoint-36000/model.safetensors'
+# resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel1/checkpoint-36000/model.safetensors'
+resume_from = False
 report_to = "tensorboard"
 
 volume_only = False
 use_checkpoint = True
 seed = 0
 use_center, use_first, use_last = True, False, False
-resolution = [160, 320]
+resolution = [256, 512]
 # resolution = [80, 80]
 # point_cloud_range = [-20.0, -20.0, -3.0, 20.0, 20.0, 3.0]
-point_cloud_range = [-10.0, -7.0, -10.0, 10.0, 3.0, 10.0]
+
+point_cloud_range = [0.0, 0.0, -7.0, 10.0, 6.28, 3.0] # r, phi, z
+scale_theta = 1
+scale_r = 1
+scale_z = 1
+
 
 dataset_params = dict(
     dataset_name="nuScenesDataset",
@@ -41,8 +48,8 @@ dataset_params = dict(
     use_center=use_center,
     use_first=use_first,
     use_last=use_last,
-    batch_size_train=6,
-    batch_size_val=6,
+    batch_size_train=4,
+    batch_size_val=4,
     batch_size_test=6,
     num_workers=32,
     num_workers_val=32,
@@ -75,9 +82,8 @@ loss_args = dict(
     weight_recon_vol=1.0,
     weight_perceptual_vol=0.05,
     weight_depth_abs_vol=0.1,
-    weight_volume_loss=0.0 #0.1
+    weight_volume_loss=0 #0.1
 )
-
 
 pc_range = point_cloud_range
 pc_xrange, pc_yrange, pc_zrange = pc_range[3] - pc_range[0], pc_range[4] - pc_range[1], pc_range[5] - pc_range[2]
@@ -85,23 +91,24 @@ pc_xrange, pc_yrange, pc_zrange = pc_range[3] - pc_range[0], pc_range[4] - pc_ra
 _dim_ = 128
 num_heads = 8
 num_layers = 1
-patch_sizes=[8, 8, 4, 2]
 _ffn_dim_ = _dim_ * 2
 
-tpv_h_ = 32   # phi
-tpv_w_ = 64  # theta
-tpv_z_ = 16  # r
-
-scale_h = 1  # 16
-scale_w = 1  # 64
-scale_z = 1 # 64
+tpv_theta_ = 64  # theta
+tpv_r_ = 16  # r
+tpv_z_ = 32  # z
 
 gpv = 3
 
-# num_points_in_pillar = [8, 16, 16]
-# num_points = [16, 32, 32]
-num_points_in_pillar = [8, 32, 16]
-num_points = [16, 64, 32]
+near_num_points_in_pillar = [16, 8, 32] # thetar ztheta rz
+near_num_points = [32, 16, 64]
+
+
+# near_num_points_in_pillar = [4, 4, 4]
+# near_num_points = [8, 8, 8]
+
+# far_num_points_in_pillar = [16, 16, 16]
+# far_num_points = [32, 32, 32]
+
 
 hybrid_attn_anchors = 16
 hybrid_attn_points = 32
@@ -112,8 +119,8 @@ self_cross_layer = dict(
     attn_cfgs=[
         dict(
             type='TPVCrossViewHybridAttention',
-            tpv_h=tpv_h_,
-            tpv_w=tpv_w_,
+            tpv_h=tpv_theta_,
+            tpv_w=tpv_r_,
             tpv_z=tpv_z_,
             num_anchors=hybrid_attn_anchors,
             embed_dims=_dim_,
@@ -129,31 +136,31 @@ self_cross_layer = dict(
                 type='TPVMSDeformableAttention3D',
                 embed_dims=_dim_,
                 num_heads=num_heads,
-                num_points=num_points,
-                num_z_anchors=num_points_in_pillar,
+                num_points=near_num_points,
+                num_z_anchors=near_num_points_in_pillar,
                 num_levels=1,
                 floor_sampling_offset=False,
-                tpv_h=tpv_h_,
-                tpv_w=tpv_w_,
+                tpv_h=tpv_theta_,
+                tpv_w=tpv_r_,
                 tpv_z=tpv_z_),
             embed_dims=_dim_,
-            tpv_h=tpv_h_,
-            tpv_w=tpv_w_,
+            tpv_h=tpv_theta_,
+            tpv_w=tpv_r_,
             tpv_z=tpv_z_)
     ],
     feedforward_channels=_ffn_dim_,
     ffn_dropout=0.1,
     operation_order=('self_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm'),
     # operation_order=('self_attn', 'norm', 'ffn', 'norm'),
-    )
+)
 
 self_layer = dict(
     type='TPVFormerLayer',
     attn_cfgs=[
         dict(
             type='TPVCrossViewHybridAttention',
-            tpv_h=tpv_h_,
-            tpv_w=tpv_w_,
+            tpv_h=tpv_theta_,
+            tpv_w=tpv_r_,
             tpv_z=tpv_z_,
             num_anchors=hybrid_attn_anchors,
             embed_dims=_dim_,
@@ -167,7 +174,7 @@ self_layer = dict(
     operation_order=('self_attn', 'norm', 'ffn', 'norm'))
 
 model = dict(
-    type='OmniGaussianDecareVolume',
+    type='OmniGaussianCylinderPixel',
     use_checkpoint=use_checkpoint,
     point_cloud_range=point_cloud_range,
     with_pixel=True,
@@ -181,7 +188,7 @@ model = dict(
         num_head=1,
     ),
     pixel_gs=dict(
-        type="PixelGaussian",
+        type="PixelGaussian512",
         use_checkpoint=use_checkpoint,
         image_height=resolution[0],
         patchs_height=1,
@@ -189,17 +196,17 @@ model = dict(
         gh_cnn_layers=3,
     ),
     volume_gs=dict(
-        type="VolumeGaussianDecare",
+        type="VolumeGaussianCylinder",
         use_checkpoint=use_checkpoint,
         encoder=dict(
-            type='TPVFormerEncoderDecare',
-            tpv_h=tpv_h_,
-            tpv_w=tpv_w_,
+            type='TPVFormerEncoderCylinder',
+            tpv_theta=tpv_theta_,
+            tpv_r=tpv_r_,
             tpv_z=tpv_z_,
             num_feature_levels=1,
             num_layers=3,
             pc_range=point_cloud_range,
-            num_points_in_pillar=num_points_in_pillar,
+            num_points_in_pillar=near_num_points_in_pillar,
             num_points_in_pillar_cross_view=[16, 16, 16],
             return_intermediate=False,
             transformerlayers=[
@@ -209,25 +216,25 @@ model = dict(
             positional_encoding=dict(
                 type='TPVFormerPositionalEncoding',
                 num_feats=[32, 48, 48],
-                h=tpv_h_,
-                w=tpv_w_,
+                h=tpv_theta_,
+                w=tpv_r_,
                 z=tpv_z_)),
         gs_decoder = dict(
-            type='VolumeGaussianDecoderDecare',
-            tpv_h=tpv_h_,
-            tpv_w=tpv_w_,
+            type='VolumeGaussianDecoderCylinder',
+            tpv_theta=tpv_theta_,
+            tpv_r=tpv_r_,
             tpv_z=tpv_z_,
             pc_range=point_cloud_range,
             gs_dim=14,
             in_dims=_dim_,
             hidden_dims=2*_dim_,
             out_dims=_dim_,
-            scale_h=scale_h,
-            scale_w=scale_w,
+            scale_theta=scale_theta,
+            scale_r=scale_r,
             scale_z=scale_z,
             gpv=gpv,
-            offset_max=[1.0, 1.0, 1.0],
-            scale_max=[1.0, 1.0, 1.0],
+            offset_max=[0.5, 0.5, 0.5],
+            scale_max=[0.5, 0.5, 0.5],
         )
     ),
     camera_args=camera_args,
