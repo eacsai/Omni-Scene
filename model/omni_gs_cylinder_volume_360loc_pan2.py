@@ -545,7 +545,8 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
                 rays_o=None,
                 rays_d=None
             )
-
+            # test_img = to_pil_image(render_pkg_fuse["image"][0,1].clip(min=0, max=1))    
+            # test_img.save('render_fuse_360Loc_all.png')
             # fuse
             tmp_pixel_img = rearrange(render_pkg_fuse["image"], "(b v) vc c h w -> b vc v c h w", b=bs, v=v) # b v vc 3 h w
             tmp_pixel_depth = rearrange(render_pkg_fuse["depth"], "(b v) vc c h w -> b vc v c h w", b=bs, v=v) # b v vc 1 h w
@@ -553,8 +554,12 @@ class OmniGaussianCylinderVolume360LocPan2(BaseModule):
             target = repeat(data_dict["output_c2ws"][:, :, :3, 3], "b v d -> b v vc d", vc=data_dict["c2ws"].shape[1])
             context = repeat(data_dict["c2ws"][:, :, :3, 3], "b vc d -> b v vc d", v=data_dict["output_c2ws"].shape[1])
             dist = torch.norm(target - context, dim=-1)
-            total = dist.sum(-1, keepdim=True)
-            weights = 1 - dist / total # b, v, vc
+
+            eps = 1e-8
+            inv_dist = 1.0 / (dist + eps)
+            weights = inv_dist / inv_dist.sum(-1, keepdim=True)
+            # total = dist.sum(-1, keepdim=True)
+            # weights = 1 - dist / total # b, v, vc
             # weights = 0.5 * torch.ones_like(weights)
             tmp_pixel_img = tmp_pixel_img * weights[..., None, None, None]
             render_pkg_fuse["image"] = tmp_pixel_img.sum(dim=2, keepdim=False) # b v 3 h w

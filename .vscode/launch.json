@@ -182,15 +182,15 @@
             "console": "integratedTerminal",
         },
         {
-            "name": "Debug OmniScene Test 360Loc_Panorama_Volume_Pan2",
+            "name": "Debug OmniScene Test 360Loc_Panorama_All",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "args": [
                 // "--config-file", "accelerate_config.yaml",
-                "--py-config", "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_double_volume_pan2.py",
-                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_Volume_Pan2_fix",
-                "--load-from", "checkpoint-3000"
+                "--py-config", "configs/OmniScene/omni_gs_160x320_360Loc_cylinder_all.py",
+                "--output-dir", "/data/qiwei/nips25/workdirs/omni_gs_160x320_360Loc_Cylinder_Double_All1",
+                "--load-from", "checkpoint-27000"
             ],
             "console": "integratedTerminal",
         },

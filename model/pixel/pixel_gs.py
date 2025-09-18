@@ -44,6 +44,8 @@ class PixelGaussian(BaseModule):
         self.rot_act = lambda x: F.normalize(x, dim=-1)
         self.rgb_act = torch.sigmoid
         
+        self.scale_min = 0.5
+        self.scale_max = 15.0
         
         self.to_gaussians_list = nn.ModuleList()
         self.gaussians_mlp_list = nn.ModuleList()
@@ -195,6 +197,7 @@ class PixelGaussian(BaseModule):
         gaussians_all["stages"] = []
         self.clean_padded_cache()
         for stage_idx, stage in enumerate(img_feats['trans_features']):
+            _, _, _, h, w = stage.shape
             features = rearrange(stage, "b v ... -> (b v) ...")
             
             # feature refine
@@ -277,7 +280,13 @@ class PixelGaussian(BaseModule):
             means = rearrange(means, "b r n c -> b (r n) c")
             # means = means + offsets
 
-            gaussians_final = torch.cat([means, rgbs, opacities, rotations, scales], dim=-1)
+            # new scale
+            scales_new = self.scale_min + (self.scale_max - self.scale_min) * scales
+            pixel_size = 1 / torch.tensor((w, h), dtype=scales_new.dtype, device=scales_new.device)
+            multiplier = self.get_scale_multiplier(pixel_size)
+            scales_new = scales_new * depth_pred * multiplier[..., None]
+
+            gaussians_final = torch.cat([means, rgbs, opacities, rotations, scales_new], dim=-1)
             gaussians_stage = {
                 "gaussians": gaussians_final,
                 "features": rearrange(raw_gaussians, "b v n c -> b (v n) c", b=bs, v=v).contiguous(),
@@ -289,3 +298,11 @@ class PixelGaussian(BaseModule):
         gaussians_all['features'] = torch.cat([g["features"] for g in gaussians_all["stages"]], dim=1)
         
         return gaussians_all
+    
+    def get_scale_multiplier(
+        self,
+        pixel_size: Float[Tensor, "*#batch 2"],
+        multiplier: float = 0.1,
+    ) -> Float[Tensor, " *batch"]:
+        xy_multipliers = multiplier * pixel_size.new_tensor([2 * np.pi, np.pi]) * pixel_size
+        return xy_multipliers.sum(dim=-1)

@@ -99,6 +99,56 @@ def two_sample(scene, extrinsics, times_per_scene, stage="train", i=0):
         index_target,
     )
 
+def three_sample(scene, extrinsics, times_per_scene, stage="train", i=0):
+    num_views, _, _ = extrinsics.shape
+    # Compute the context view spacing based on the current global step.
+    if stage == "val":
+        # When testing, always use the full gap.
+        min_gap = max_gap = 4
+    else:
+        min_gap = max_gap = 3
+    max_gap = min(num_views - 1, min_gap)
+
+    # Pick the gap between the context views.
+    # NOTE: we keep the bug untouched to follow initial pixelsplat cfgs
+
+    context_gap = torch.randint(
+        min_gap,
+        max_gap + 1,
+        size=tuple(),
+        device='cpu',
+    ).item()
+
+    # Pick the left and right context indices.
+
+    if stage == "val":
+        index_context_left = (num_views - context_gap - 1) * i / max((times_per_scene - 1), 1)
+        index_context_left = int(index_context_left)
+    else:
+        index_context_left = torch.randint(
+            num_views - context_gap,
+            size=tuple(),
+            device='cpu',
+        ).item()
+    index_context_right = index_context_left + context_gap
+    index_context_mid = index_context_left + context_gap//2
+    # index_target = torch.arange(
+    #         index_context_left + 1,
+    #         index_context_right,
+    #         device='cpu',
+    #     )
+
+    index_target = torch.arange(
+        index_context_left,
+        index_context_right + 1,
+        device='cpu',
+    )
+
+    return (
+        torch.tensor((index_context_left, index_context_mid, index_context_right)),
+        index_target,
+    )
+
 
 class Dataset360Loc(IterableDataset):
     def __init__(

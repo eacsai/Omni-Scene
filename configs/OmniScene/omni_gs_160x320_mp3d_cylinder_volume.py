@@ -5,7 +5,7 @@ _base_ = [
     './_base_/schedule.py',
 ]
 
-exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume1"
+exp_name = "omni_gs_160x320_mp3d_cylinder_double_volume_random"
 output_dir = "/data/qiwei/nips25/workdirs"
 
 lr = 2e-4 #1e-4
@@ -23,8 +23,8 @@ warmup_steps = 1000
 mixed_precision = "no"
 gradient_accumulation_steps = 1
 # resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_cam/checkpoint-36000/model.safetensors'
-resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_random/checkpoint-36000/model.safetensors'
-# resume_from = '/data/qiwei/nips25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel1/checkpoint-36000/model.safetensors'
+# resume_from = '/home/qiwei/ICLR25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel_random/checkpoint-45000/model.safetensors'
+resume_from = '/home/qiwei/ICLR25/workdirs/omni_gs_160x320_mp3d_cylinder_double_pixel/checkpoint-36000/model.safetensors'
 # resume_from = False
 report_to = "tensorboard"
 
